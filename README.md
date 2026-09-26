@@ -6,6 +6,7 @@
 
 ```
 .devin-plugin/plugin.json   # プラグインマニフェスト(name が /<plugin>:<skill> の名前空間になる)
+AGENTS.md                   # 全セッションに常時適用される共通ルール
 skills/<name>/SKILL.md      # スキル本体(必要になったらこの下にディレクトリを追加)
 rules/<name>.md             # トリガー付きルール(条件が合うセッションでのみ読み込まれる)
 ```
