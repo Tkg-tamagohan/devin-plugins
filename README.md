@@ -7,7 +7,10 @@
 ```
 .devin-plugin/plugin.json   # プラグインマニフェスト(name が /<plugin>:<skill> の名前空間になる)
 skills/<name>/SKILL.md      # スキル本体(必要になったらこの下にディレクトリを追加)
+rules/<name>.md             # トリガー付きルール(条件が合うセッションでのみ読み込まれる)
 ```
+
+`rules/register-skill.md` により、セッション中に再利用可能なスキルを作成した Devin はこのリポジトリへの追加 PR を自動で作る。
 
 ## インストール / 更新
 
