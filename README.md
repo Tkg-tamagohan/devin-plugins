@@ -1,17 +1,20 @@
 # shared-skills (Devin plugin)
 
-組織横断で使う Devin スキルを管理するプラグインリポジトリ。
+組織横断で使う Devin のルールとスキルを管理するプラグインリポジトリ。
 
 ## 構成
 
 ```
-.devin-plugin/plugin.json   # プラグインマニフェスト(name が /<plugin>:<skill> の名前空間になる)
-AGENTS.md                   # 全セッションに常時適用される共通ルール
-skills/<name>/SKILL.md      # スキル本体(必要になったらこの下にディレクトリを追加)
-rules/<name>.md             # トリガー付きルール(条件が合うセッションでのみ読み込まれる)
+.devin-plugin/plugin.json          # プラグインマニフェスト(name が /<plugin>:<skill> の名前空間になる)
+AGENTS.md                          # 全セッションに常時適用される共通ルール(作業種別に依存しない短い制約のみ)
+rules/<name>.md                    # トリガー付きルール(description に合う状況のセッションでのみ本文が読まれる)
+skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
+skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート
 ```
 
-`rules/register-skill.md` により、セッション中に再利用可能なスキルを作成した Devin はこのリポジトリへの追加 PR を自動で作る。
+ルールやスキルをどこに置くか、どの粒度で分けるかの基準は `skills/plugin-authoring/guidelines.md` にまとめている。
+新しく追加するときは、スキル `shared-skills:plugin-authoring` の手順に従う。
+`rules/register-to-devin-plugins.md` により、セッション中に再利用可能なルールやスキルを作成した Devin はこのリポジトリへの追加 PR を自動で作る。
 
 ## インストール / 更新
 

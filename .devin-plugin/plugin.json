@@ -1,5 +1,5 @@
 {
   "name": "shared-skills",
-  "version": "0.1.8",
-  "description": "Organization-wide shared skills (Japanese tech writing style guide, etc.)"
+  "version": "0.2.0",
+  "description": "Organization-wide shared rules and skills for Devin sessions (always-on AGENTS.md, triggered rules, and skills)"
 }
