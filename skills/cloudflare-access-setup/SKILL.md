@@ -16,7 +16,7 @@ Pages サイトを Access で保護する作業は、ダッシュボードでし
 ## 手順
 
 1. Zero Trust 組織の有無を確認する。組織の初回作成はダッシュボード（one.dash.cloudflare.com）でしかできない。未作成なら、チーム名の入力と無料プランの選択だけをユーザーに依頼する。
-2. API トークンに Zero Trust/Access 系の Edit 権限が要る。不足している場合は既存トークンへの権限追加をユーザーに依頼する。GitHub Actions 用のデプロイトークンとは別物である旨を伝える。
+2. API トークンに Zero Trust/Access 系の Edit 権限が要る。不足している場合は、Zero Trust Edit だけを持つ専用トークンの作成をユーザーに依頼する（ルール `scoped-secret-provisioning`）。GitHub Actions 用のデプロイトークンとは別物であり、既存トークンへ権限を足す先にもしない旨を伝える。
 3. Self-hosted アプリケーションを保護対象のホスト名で作成し、ポリシーは Allow + Include: Emails = <許可するメール> で作る。
 4. ログイン方法はメール OTP（One-time PIN）にする。新しい組織では OTP がログイン方法に自動追加されず、IdP として作成する方式に変わっている。旧手順（Settings → Authentication → Login methods のチェック）が API に無くても、IdP の追加は API でできる。
 5. 設定後、未認証アクセスが `<team>.cloudflareaccess.com` へ 302 されること、非許可メールでは OTP が届かず先へ進めないことを実機で確認する。
