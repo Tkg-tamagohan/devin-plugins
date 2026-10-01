@@ -12,6 +12,8 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
   箇条書きは本スキルが許容するため、警告ではなく情報として出す)
 - 行内のダッシュ記号(em ダッシュ等)の検出を追加(本スキルの整形規範)
 - 「〜に他なりません」の検出が波線の直前に限られていた問題を修正
+- 「」で囲まれた言及(禁止表現の例示)を語彙・構文検査の対象から除外
+- 助詞「の」で数珠つなぎになった名詞連結(過圧縮)の検出を追加
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -87,6 +89,18 @@ FILLER_PATTERNS = [
 
 # ネガティブパラレリズム(A ではなく B)
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
+
+# 名詞の過剰連結(サ変名詞の数珠つなぎ)。助詞「の」で 3 つ以上の名詞が
+# 連結している断片を拾い、サ変名詞・抽象名詞の個数で絞り込む。
+# セグメントは純粋な名詞句に限るため、格助詞や接続助詞(は・が・を・も・と)を
+# 含む断片は連結とみなさない
+NOUN_CHAIN_PATTERN = re.compile(r"[^\s、。！？「」（）：:<>はがをもと・]{1,15}の[^\s、。！？「」（）：:<>はがをもと・]{1,15}の[^\s、。！？「」（）：:<>はがをもと・]+")
+# サ変名詞・抽象名詞の目印(代表的な語尾、または 3 字以上のカタカナ語)
+ABSTRACT_NOUN_PATTERN = re.compile(
+    r"(化|性|度|率|量|観|感|的|止|施|討|生|認|理|延|善|応|用|保|能|合|解|断|開|成|定|務|証|準|装|報)$|[ァ-ヶー]{3,}"
+)
+# 格助詞でない「の」を含む定型(一つの、ものの、ための、ので)は連結判定から隠す
+CHAIN_MASK_PATTERN = re.compile(r"一つの|ものの|ための|ので")
 
 
 CODE_FENCE_PATTERN = re.compile(r"^(`{3,}|~{3,})")
@@ -318,8 +332,15 @@ def lint_text(text: str) -> Dict[str, Any]:
 
         # インラインコード(`...`)を除去したテキストを作成
         scan_text = re.sub(r"`[^`]+`", "", stripped)
+        # 「」で囲まれた言及は禁止表現の例示であることが多い。use と mention を
+        # 区別するため、語彙・構文検査は言及を除いたテキストで行う。
+        # 空文字で消すと前後が接合して誤検出するため中黒で置き換える。
+        # 中黒は \s に一致しないので和欧文間の空白検査を誤発火させず、
+        # かつ各検査パターンを跨げない区切りになる。「X」ではなく「Y」では
+        # ではなく が残るので、実際の対比は引き続き検査できる
+        mention_free = re.sub(r"「[^」]*」", "・", scan_text)
         # 太字や強調などの装飾記号(**、*、__)を除去した正規化テキストで語彙・比喩を検査
-        plain_text = re.sub(r"\*\*|\*|__", "", scan_text)
+        plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
 
         # 見出し行は補足カッコとダッシュのみ検査し、本文の語彙・構文検査はスキップ
         if stripped.startswith("#"):
@@ -331,7 +352,7 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "message": "見出しに情報量の増えない補足カッコが含まれています。平文で簡潔に記述してください。",
                     "snippet": line.strip()
                 })
-            if DASH_PATTERN.search(scan_text):
+            if DASH_PATTERN.search(mention_free):
                 findings.append({
                     "rule": "dash_prohibited",
                     "line": line_no,
@@ -346,13 +367,14 @@ def lint_text(text: str) -> Dict[str, Any]:
             continue
 
         # 箇条書きの記号部分を除き、行頭のフィラーなども検査できるようにする。
-        # plain_text は箇条書き除去後の scan_text から作る(* が強調記号として
+        # plain_text は箇条書き除去後の mention_free から作る(* が強調記号として
         # 先に除去されると行頭に空白が残り、行頭パターンに一致しなくなる)
         scan_text = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", scan_text)
-        plain_text = re.sub(r"\*\*|\*|__", "", scan_text)
+        mention_free = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", mention_free)
+        plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
 
         # ダッシュ記号検知(本スキルの整形規範)
-        if DASH_PATTERN.search(scan_text):
+        if DASH_PATTERN.search(mention_free):
             findings.append({
                 "rule": "dash_prohibited",
                 "line": line_no,
@@ -364,7 +386,7 @@ def lint_text(text: str) -> Dict[str, Any]:
         # 和欧文間の不自然な半角空白検知(例: 「も yomiyasu で」「この README は」)。
         # リンク構文 [text](url) は表示テキストに置換して検査する
         # (丸ごと消すとリンクを挟んだ語同士が誤って隣接扱いになる)
-        space_scan_text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", scan_text)
+        space_scan_text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", mention_free)
         if re.search(r"([ぁ-んァ-ヶ一-龥])\s+([a-zA-Z0-9_-]{2,})\s+([ぁ-ん])", space_scan_text):
             findings.append({
                 "rule": "unnatural_halfwidth_space",
@@ -427,6 +449,21 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "message": "「A ではなく B」構文が検出されました。誤解を解くために残す場合は否定の根拠を一文添え、それ以外は肯定文で直接書けないか検討してください。",
                     "snippet": line.strip()
                 })
+
+        # 名詞の過剰連結(サ変名詞の数珠つなぎ)。最初の候補が閾値未満でも後続を
+        # 評価し、閾値を満たす候補があれば 1 行につき 1 件だけ出す
+        for m in NOUN_CHAIN_PATTERN.finditer(CHAIN_MASK_PATTERN.sub("・", plain_text)):
+            segments = m.group(0).split("の")
+            abstract_hits = sum(1 for s in segments if ABSTRACT_NOUN_PATTERN.search(s))
+            if abstract_hits >= 2 or (len(segments) >= 4 and abstract_hits >= 1):
+                findings.append({
+                    "rule": "noun_chain",
+                    "line": line_no,
+                    "severity": "info",
+                    "message": "名詞が助詞「の」で数珠つなぎに連結されています。過圧縮であれば、行為者を主語に据えて動詞の文へ展開するか検討してください。",
+                    "snippet": line.strip()
+                })
+                break
 
     # スコア計算(100 点満点からの減点方式: warn=5 点, info=2 点)
     penalty = sum(5 if f["severity"] in ("warn", "error") else 2 for f in findings)
