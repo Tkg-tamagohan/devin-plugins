@@ -88,9 +88,22 @@ FILLER_PATTERNS = [
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
 
 
-def is_code_fence(stripped: str) -> bool:
-    """コードフェンス行(``` または ~~~)かどうかを返す"""
-    return stripped.startswith("```") or stripped.startswith("~~~")
+CODE_FENCE_PATTERN = re.compile(r"^(`{3,}|~{3,})")
+
+
+def update_code_fence(stripped: str, open_fence: Optional[str]) -> Optional[str]:
+    """コードフェンスの状態を更新して返す
+
+    Markdown では開いたフェンスと同じ種類の記号で、同じ長さ以上の行のみが
+    ブロックを閉じる。別種のフェンス行はブロック内の本文として扱う。
+    open_fence は開いているフェンス記号(例: '```')、開いていなければ None。
+    """
+    m = CODE_FENCE_PATTERN.match(stripped)
+    if open_fence is None:
+        return m.group(1) if m else None
+    if m and m.group(1)[0] == open_fence[0] and len(m.group(1)) >= len(open_fence):
+        return None
+    return open_fence
 
 
 def get_frontmatter_line_count(lines: List[str]) -> int:
@@ -111,17 +124,16 @@ def extract_plain_sentences(text: str) -> List[Tuple[int, Optional[str]]]:
     """
     lines = text.split("\n")
     sentences = []
-    in_code_block = False
+    open_fence = None
     fm_lines = get_frontmatter_line_count(lines)
 
     for idx, line in enumerate(lines, 1):
         if idx <= fm_lines:
             continue
         stripped = line.strip()
-        if is_code_fence(stripped):
-            in_code_block = not in_code_block
-            continue
-        if in_code_block:
+        prev_fence = open_fence
+        open_fence = update_code_fence(stripped, open_fence)
+        if prev_fence is not None or open_fence is not None:
             continue
         # 見出しは節の境界として記録する
         if stripped.startswith("#"):
@@ -204,16 +216,17 @@ def analyze_markdown_metrics(text: str) -> Dict[str, Any]:
     """太字頻度、箇条書き比率などの構造メトリクスを算出(引用文やコードブロックは除外)"""
     lines = text.split("\n")
     plain_lines = []
-    in_code = False
+    open_fence = None
     fm_lines = get_frontmatter_line_count(lines)
     for idx, l in enumerate(lines, 1):
         if idx <= fm_lines:
             continue
         stripped = l.strip()
-        if is_code_fence(stripped):
-            in_code = not in_code
+        prev_fence = open_fence
+        open_fence = update_code_fence(stripped, open_fence)
+        if prev_fence is not None or open_fence is not None:
             continue
-        if in_code or stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
+        if stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
             continue
         plain_lines.append(l)
 
@@ -276,16 +289,15 @@ def lint_text(text: str) -> Dict[str, Any]:
 
     # 3. 語彙・構文パターン検査
     lines = text.split("\n")
-    in_code = False
+    open_fence = None
     fm_lines = get_frontmatter_line_count(lines)
     for line_no, line in enumerate(lines, 1):
         if line_no <= fm_lines:
             continue
         stripped = line.strip()
-        if is_code_fence(stripped):
-            in_code = not in_code
-            continue
-        if in_code:
+        prev_fence = open_fence
+        open_fence = update_code_fence(stripped, open_fence)
+        if prev_fence is not None or open_fence is not None:
             continue
 
         # 絵文字検知(見出し・本文問わず禁止)
@@ -328,9 +340,11 @@ def lint_text(text: str) -> Dict[str, Any]:
         if stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
             continue
 
-        # 箇条書きの記号部分を除き、行頭のフィラーなども検査できるようにする
+        # 箇条書きの記号部分を除き、行頭のフィラーなども検査できるようにする。
+        # plain_text は箇条書き除去後の scan_text から作る(* が強調記号として
+        # 先に除去されると行頭に空白が残り、行頭パターンに一致しなくなる)
         scan_text = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", scan_text)
-        plain_text = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", plain_text)
+        plain_text = re.sub(r"\*\*|\*|__", "", scan_text)
 
         # ダッシュ記号検知(本スキルの整形規範)
         if DASH_PATTERN.search(scan_text):
@@ -343,8 +357,9 @@ def lint_text(text: str) -> Dict[str, Any]:
             })
 
         # 和欧文間の不自然な半角空白検知(例: 「も yomiyasu で」「この README は」)。
-        # リンク構文 [text](url) の範囲は誤検出防止のため検査対象から除くが、行全体は除外しない
-        space_scan_text = re.sub(r"\[.*?\]\(.*?\)", "", scan_text)
+        # リンク構文 [text](url) は表示テキストに置換して検査する
+        # (丸ごと消すとリンクを挟んだ語同士が誤って隣接扱いになる)
+        space_scan_text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", scan_text)
         if re.search(r"([ぁ-んァ-ヶ一-龥])\s+([a-zA-Z0-9_-]{2,})\s+([ぁ-ん])", space_scan_text):
             findings.append({
                 "rule": "unnatural_halfwidth_space",
