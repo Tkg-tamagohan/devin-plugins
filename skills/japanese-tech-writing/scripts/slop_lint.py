@@ -21,7 +21,7 @@ import sys
 import re
 import argparse
 import json
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # 絵文字正規表現パターン(CJK 統合漢字拡張などのサロゲートペア漢字を除外した厳密な絵文字範囲)
 EMOJI_PATTERN = re.compile(
@@ -65,7 +65,7 @@ METAPHOR_VERB_PATTERNS = [
     (r"黙って(無視|捨て|スキップ|破棄)", "英語直訳「黙って無視される」"),
     (r"側に倒[すしせ]", "判断を方向で表現する「〜側に倒す」"),
     (r"時間[をに]溶か[したす]", "比喩動詞「時間を溶かす」"),
-    (r"(1つずつ|一つずつ)潰[していく]", "比喩動詞「潰す」"),
+    (r"(1つずつ|一つずつ)潰[していくす]", "比喩動詞「潰す」"),
     (r"した瞬間に?", "英語直訳「〜した瞬間 (the moment ...)」"),
     (r"(前提|基盤)が崩れ[るた]", "抽象比喩「前提が崩れる」"),
     (r"文化が醸成", "非生物主語「文化が醸成される」"),
@@ -88,6 +88,11 @@ FILLER_PATTERNS = [
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
 
 
+def is_code_fence(stripped: str) -> bool:
+    """コードフェンス行(``` または ~~~)かどうかを返す"""
+    return stripped.startswith("```") or stripped.startswith("~~~")
+
+
 def get_frontmatter_line_count(lines: List[str]) -> int:
     """YAML フロントマター(先頭の --- から次の --- まで)の行数を返す"""
     if not lines or lines[0].strip() != "---":
@@ -98,8 +103,12 @@ def get_frontmatter_line_count(lines: List[str]) -> int:
     return 0
 
 
-def extract_plain_sentences(text: str) -> List[Tuple[int, str]]:
-    """コードブロックや引用、箇条書きを除去し、地の文の段落文(行番号つき)を抽出する"""
+def extract_plain_sentences(text: str) -> List[Tuple[int, Optional[str]]]:
+    """コードブロックや引用、箇条書きを除去し、地の文の段落文(行番号つき)を抽出する
+
+    見出し行は (行番号, None) の境界マーカーとして残し、文末連続の
+    判定が節をまたがないようにする。
+    """
     lines = text.split("\n")
     sentences = []
     in_code_block = False
@@ -109,15 +118,18 @@ def extract_plain_sentences(text: str) -> List[Tuple[int, str]]:
         if idx <= fm_lines:
             continue
         stripped = line.strip()
-        if stripped.startswith("```"):
+        if is_code_fence(stripped):
             in_code_block = not in_code_block
             continue
         if in_code_block:
             continue
-        # 空行、見出し、表行、画像記法、HTML タグ、引用行、箇条書き行、インデントされたリスト継続行は地の文から除外
+        # 見出しは節の境界として記録する
+        if stripped.startswith("#"):
+            sentences.append((idx, None))
+            continue
+        # 空行、表行、画像記法、HTML タグ、引用行、箇条書き行、インデントされたリスト継続行は地の文から除外
         if (
             not stripped
-            or stripped.startswith("#")
             or stripped.startswith("|")
             or stripped.startswith("![")
             or stripped.startswith("[![")
@@ -139,12 +151,15 @@ def extract_plain_sentences(text: str) -> List[Tuple[int, str]]:
     return sentences
 
 
-def check_sentence_end_repetitions(sentences: List[Tuple[int, str]]) -> List[Dict[str, Any]]:
-    """3 文以上連続する同一語尾の検知"""
+def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -> List[Dict[str, Any]]:
+    """3 文以上連続する同一語尾の検知。見出しの境界マーカーで連続数を切り離す"""
     findings = []
     end_types = []
 
     for line_no, s in sentences:
+        if s is None:
+            end_types.append((line_no, s, "boundary"))
+            continue
         clean = re.sub(r"[。！？\s]+$", "", s)
         end_type = "その他"
         if clean.endswith("です"):
@@ -195,7 +210,7 @@ def analyze_markdown_metrics(text: str) -> Dict[str, Any]:
         if idx <= fm_lines:
             continue
         stripped = l.strip()
-        if stripped.startswith("```"):
+        if is_code_fence(stripped):
             in_code = not in_code
             continue
         if in_code or stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
@@ -267,7 +282,7 @@ def lint_text(text: str) -> Dict[str, Any]:
         if line_no <= fm_lines:
             continue
         stripped = line.strip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
+        if is_code_fence(stripped):
             in_code = not in_code
             continue
         if in_code:
@@ -284,7 +299,12 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "snippet": line.strip()
             })
 
-        # 見出し行の余計な言い換え補足カッコ検知
+        # インラインコード(`...`)を除去したテキストを作成
+        scan_text = re.sub(r"`[^`]+`", "", stripped)
+        # 太字や強調などの装飾記号(**、*、__)を除去した正規化テキストで語彙・比喩を検査
+        plain_text = re.sub(r"\*\*|\*|__", "", scan_text)
+
+        # 見出し行は補足カッコとダッシュのみ検査し、本文の語彙・構文検査はスキップ
         if stripped.startswith("#"):
             if re.search(r"（(素の出力|いわゆる|概要|詳細|感謝と設計への反映)）", stripped):
                 findings.append({
@@ -294,18 +314,25 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "message": "見出しに情報量の増えない補足カッコが含まれています。平文で簡潔に記述してください。",
                     "snippet": line.strip()
                 })
+            if DASH_PATTERN.search(scan_text):
+                findings.append({
+                    "rule": "dash_prohibited",
+                    "line": line_no,
+                    "severity": "warn",
+                    "message": "見出しにダッシュ記号(—、―、——)が含まれています。単一の自然な句に書き直してください。",
+                    "snippet": line.strip()
+                })
             continue
 
         # 引用ブロック(>)やテーブル行(|)、画像、HTML タグはアンチパターン例示等の可能性が高いため語彙スキャンをスキップ
         if stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
             continue
 
-        # インラインコード(`...`)を除去したテキストを作成
-        scan_text = re.sub(r"`[^`]+`", "", stripped)
-        # 太字や強調などの装飾記号(**、*、__)を除去した正規化テキストで語彙・比喩を検査
-        plain_text = re.sub(r"\*\*|\*|__", "", scan_text)
+        # 箇条書きの記号部分を除き、行頭のフィラーなども検査できるようにする
+        scan_text = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", scan_text)
+        plain_text = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", plain_text)
 
-        # ダッシュ記号検知(本スキルの整形規範。箇条書き行を含む地の文が対象)
+        # ダッシュ記号検知(本スキルの整形規範)
         if DASH_PATTERN.search(scan_text):
             findings.append({
                 "rule": "dash_prohibited",
@@ -315,17 +342,17 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "snippet": line.strip()
             })
 
-        # 和欧文間の不自然な半角空白検知(例: 「も yomiyasu で」「この README は」)
-        if re.search(r"([ぁ-んァ-ヶ一-龥])\s+([a-zA-Z0-9_-]{2,})\s+([ぁ-ん])", scan_text):
-            # リンク構文 [text](url) の一部でないことを確認
-            if not re.search(r"\[.*?\]\(.*?\)", scan_text):
-                findings.append({
-                    "rule": "unnatural_halfwidth_space",
-                    "line": line_no,
-                    "severity": "warn",
-                    "message": "英単語の前後に不要な半角空白が空けられています。日本語の助詞と自然に接続させてください。",
-                    "snippet": line.strip()
-                })
+        # 和欧文間の不自然な半角空白検知(例: 「も yomiyasu で」「この README は」)。
+        # リンク構文 [text](url) の範囲は誤検出防止のため検査対象から除くが、行全体は除外しない
+        space_scan_text = re.sub(r"\[.*?\]\(.*?\)", "", scan_text)
+        if re.search(r"([ぁ-んァ-ヶ一-龥])\s+([a-zA-Z0-9_-]{2,})\s+([ぁ-ん])", space_scan_text):
+            findings.append({
+                "rule": "unnatural_halfwidth_space",
+                "line": line_no,
+                "severity": "warn",
+                "message": "英単語の前後に不要な半角空白が空けられています。日本語の助詞と自然に接続させてください。",
+                "snippet": line.strip()
+            })
 
         # 文末コロン(全角「:」または半角「:」)検知
         if re.search(r"[：:]$", scan_text) and not scan_text.startswith("http"):
