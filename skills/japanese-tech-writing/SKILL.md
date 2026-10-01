@@ -167,4 +167,4 @@ python3 <スキルのディレクトリ>/scripts/slop_lint.py <対象ファイ�
 
 ---
 
-出典: [k16shikano/japanese-tech-writing SKILL](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d)（組織向けに一部修正）。機械検査のリンターと語彙カタログは [nanaism/yomiyasu](https://github.com/nanaism/yomiyasu)（MIT License）を基に本規範へ合わせて調整したもの。
+出典: [k16shikano/japanese-tech-writing SKILL](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d)（組織向けに一部修正）。機械検査のリンターと語彙カタログは [nanaism/yomiyasu](https://github.com/nanaism/yomiyasu)（MIT License。条文は `LICENSE-yomiyasu` に同梱）を基に本規範へ合わせて調整したもの。

@@ -93,4 +93,4 @@ AI 普及以後の技術文書で急増した比喩・評価名詞を解体す�
 
 ---
 
-出典: [nanaism/yomiyasu](https://github.com/nanaism/yomiyasu) の `references/slop-catalog.md`(MIT License, Copyright (c) 2026 nanaism)を基に、本スキル向けに改変。
+出典: [nanaism/yomiyasu](https://github.com/nanaism/yomiyasu) の `references/slop-catalog.md`(MIT License, Copyright (c) 2026 nanaism。条文は `../LICENSE-yomiyasu` に同梱)を基に、本スキル向けに改変。

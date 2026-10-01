@@ -5,6 +5,7 @@ slop_lint.py - 日本語文章の AI っぽさ(LLM スロップ)機械検査ス�
 nanaism/yomiyasu (MIT License, Copyright (c) 2026 nanaism) の
 yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 規範と衝突しないよう改変したもの。
+ライセンス条文はスキルディレクトリの LICENSE-yomiyasu を参照。
 
 本スキルとの調整点:
 - 太字頻度と箇条書き比率は info に降格(定義語の太字・定義列挙の
