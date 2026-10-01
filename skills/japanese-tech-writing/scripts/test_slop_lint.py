@@ -38,6 +38,19 @@ class TestMentionExemption(unittest.TestCase):
             rules_of("「同期」ではなく「非同期」を採用する。"),
         )
 
+    def test_mention_04_引用境界の区切りは空白とみなさない(self):
+        # 置き換えた区切りが \s に一致すると和欧文間空白の誤検出になる回帰
+        self.assertNotIn(
+            "unnatural_halfwidth_space",
+            rules_of("この「用語」README で確認する。"),
+        )
+
+    def test_mention_05_実際の半角空白は検出する(self):
+        self.assertIn(
+            "unnatural_halfwidth_space",
+            rules_of("この README で確認する。"),
+        )
+
 
 class TestNounChain(unittest.TestCase):
     """助詞「の」の名詞連結(過圧縮)検出"""
