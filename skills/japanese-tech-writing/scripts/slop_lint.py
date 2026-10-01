@@ -215,7 +215,7 @@ def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -
         prev_line, prev_s, prev_type = end_types[i - 1]
         curr_line, curr_s, curr_type = end_types[i]
 
-        if curr_type != "その他" and curr_type == prev_type:
+        if curr_type not in ("その他", "boundary") and curr_type == prev_type:
             count += 1
             if count == 3:
                 findings.append({
@@ -335,8 +335,7 @@ def lint_text(text: str) -> Dict[str, Any]:
         # 「」で囲まれた言及は禁止表現の例示であることが多い。use と mention を
         # 区別するため、語彙・構文検査は言及を除いたテキストで行う。
         # 空文字で消すと前後が接合して誤検出するため中黒で置き換える。
-        # 中黒は \s に一致しないので和欧文間の空白検査を誤発火させず、
-        # かつ各検査パターンを跨げない区切りになる。「X」ではなく「Y」では
+        # 中黒は各検査パターンを跨げない区切りになる。「X」ではなく「Y」では
         # ではなく が残るので、実際の対比は引き続き検査できる
         mention_free = re.sub(r"「[^」]*」", "・", scan_text)
         # 太字や強調などの装飾記号(**、*、__)を除去した正規化テキストで語彙・比喩を検査
@@ -380,19 +379,6 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "line": line_no,
                 "severity": "warn",
                 "message": "ダッシュ記号(—、―、——)が検出されました。挿入は括弧へ、言い換えは句点や読点へ書き直してください。",
-                "snippet": line.strip()
-            })
-
-        # 和欧文間の不自然な半角空白検知(例: 「も yomiyasu で」「この README は」)。
-        # リンク構文 [text](url) は表示テキストに置換して検査する
-        # (丸ごと消すとリンクを挟んだ語同士が誤って隣接扱いになる)
-        space_scan_text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", mention_free)
-        if re.search(r"([ぁ-んァ-ヶ一-龥])\s+([a-zA-Z0-9_-]{2,})\s+([ぁ-ん])", space_scan_text):
-            findings.append({
-                "rule": "unnatural_halfwidth_space",
-                "line": line_no,
-                "severity": "warn",
-                "message": "英単語の前後に不要な半角空白が空けられています。日本語の助詞と自然に接続させてください。",
                 "snippet": line.strip()
             })
 

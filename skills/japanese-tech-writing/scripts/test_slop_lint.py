@@ -1,7 +1,7 @@
 """slop_lint の回帰テスト
 
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
-ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、BASE=既存ルールの維持。
+ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -36,19 +36,6 @@ class TestMentionExemption(unittest.TestCase):
         self.assertIn(
             "negative_parallelism",
             rules_of("「同期」ではなく「非同期」を採用する。"),
-        )
-
-    def test_mention_04_引用境界の区切りは空白とみなさない(self):
-        # 置き換えた区切りが \s に一致すると和欧文間空白の誤検出になる回帰
-        self.assertNotIn(
-            "unnatural_halfwidth_space",
-            rules_of("この「用語」README で確認する。"),
-        )
-
-    def test_mention_05_実際の半角空白は検出する(self):
-        self.assertIn(
-            "unnatural_halfwidth_space",
-            rules_of("この README で確認する。"),
         )
 
 
@@ -87,6 +74,32 @@ class TestNounChain(unittest.TestCase):
         )
 
 
+class TestSentenceEndRepetition(unittest.TestCase):
+    """同一文末の連続検出。見出しの境界マーカーは反復対象ではなく連続数の切り離し"""
+
+    def test_end_01_見出しと箇条書きだけの節が続いても検出しない(self):
+        # 境界マーカーを反復文末として数えていた誤判定の回帰
+        text = "# A\n\n- x\n\n## B\n\n- y\n\n## C\n\n- z\n"
+        self.assertNotIn(
+            "sentence_end_repetition",
+            rules_of(text),
+        )
+
+    def test_end_02_同一文末の三連続は検出する(self):
+        text = "値は正しいです。\n形式も正しいです。\n結果も正しいです。\n"
+        self.assertIn(
+            "sentence_end_repetition",
+            rules_of(text),
+        )
+
+    def test_end_03_見出しで連続数が切り離される(self):
+        text = "値は正しいです。\n形式も正しいです。\n\n## 次の節\n\n結果も正しいです。\n"
+        self.assertNotIn(
+            "sentence_end_repetition",
+            rules_of(text),
+        )
+
+
 class TestExistingRules(unittest.TestCase):
     """言及除外の追加後も既存ルールが維持されること"""
 
@@ -100,6 +113,13 @@ class TestExistingRules(unittest.TestCase):
         self.assertEqual(
             [],
             rules_of("質の高い文書を心がけます。"),
+        )
+
+    def test_base_03_和欧文間の半角空白は指摘しない(self):
+        # 規範の改定で空白は許容された。空白検査自体が除去されたことの回帰
+        self.assertEqual(
+            [],
+            rules_of("この README で確認する。"),
         )
 
 
