@@ -89,18 +89,22 @@ NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。�
 
 
 CODE_FENCE_PATTERN = re.compile(r"^(`{3,}|~{3,})")
+# 終了フェンスは info 文字列を持てない(記号と末尾の空白のみ)
+CLOSING_FENCE_PATTERN = re.compile(r"^(`{3,}|~{3,})\s*$")
 
 
 def update_code_fence(stripped: str, open_fence: Optional[str]) -> Optional[str]:
     """コードフェンスの状態を更新して返す
 
-    Markdown では開いたフェンスと同じ種類の記号で、同じ長さ以上の行のみが
-    ブロックを閉じる。別種のフェンス行はブロック内の本文として扱う。
+    Markdown では開いたフェンスと同じ種類の記号で、同じ長さ以上かつ
+    info 文字列のない行のみがブロックを閉じる。別種のフェンス行や
+    言語指定つきの行はブロック内の本文として扱う。
     open_fence は開いているフェンス記号(例: '```')、開いていなければ None。
     """
-    m = CODE_FENCE_PATTERN.match(stripped)
     if open_fence is None:
+        m = CODE_FENCE_PATTERN.match(stripped)
         return m.group(1) if m else None
+    m = CLOSING_FENCE_PATTERN.match(stripped)
     if m and m.group(1)[0] == open_fence[0] and len(m.group(1)) >= len(open_fence):
         return None
     return open_fence
