@@ -23,8 +23,8 @@ description: 複数の改善・機能を複数の子セッションに並列で�
 
 ## 運用上の注意
 
-- **同時起動スロット**：この組織の SWE-2 無料枠は同時 5 セッション（親を含む）までで、超過分のセッション作成は HTTP 429 で即失敗する。アイドル・完了済みの子も suspend するまでスロットを占有し続けるため、完了した子を `devin_session_interact(action="sleep")` で寝かせてから次を起こす。前フェーズの子が残ったまま次フェーズを始めると 429 になるので、フェーズの切り替わりで不要な子を寝かせる。
-- **子への自己 sleep 指示**：完了条件の最後に自己 sleep を指示すると structured output は記録されるが、ワークフローの `agent()` は `settled without finishing (status=suspended)` で失敗扱いになる。成果物自体は完成しているので `run_id` で resume して同じ agent を再実行しない（重複 PR ができる）。出力は `devin_session_interact(action="get")` の `structured_output` で回収する。
+- **同時起動スロット**：この組織の SWE-2 無料枠は執筆時点（2026-10）で同時 5 セッション（親を含む）までで、超過分のセッション作成は HTTP 429 で即失敗する。枠の値はプロモーションやプランの変更で変わりうるため、429 が出たら現行の上限を確認する。アイドル・完了済みの子も suspend するまでスロットを占有し続けるため、完了した子を `devin_session_interact(action="sleep")` で寝かせてから次を起こす。前フェーズの子が残ったまま次フェーズを始めると 429 になるので、フェーズの切り替わりで不要な子を寝かせる。
+- **子への自己 sleep 指示**：完了条件の最後に自己 sleep を指示すると structured output は記録されるが、ワークフローの `agent()` は執筆時点の挙動では `settled without finishing (status=suspended)` で失敗扱いになる。成果物自体は完成しているので `run_id` で resume して同じ agent を再実行しない（重複 PR ができる）。出力は `devin_session_interact(action="get")` の `structured_output` で回収する。
 - **直接起動のフォールバック**：429 で失敗した残トラックは `devin_session_create` で直接起こしてよい。ワークフローの外でも起動でき、スロットが空き次第すぐ再開できる。
 - **起動直後の run 失敗**：スクリプトの構文ミスで run が起動直後に failed したときは、修正して新規 run を作る。完了済み agent の結果は resume でリプレイされる。
 
