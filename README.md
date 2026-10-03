@@ -17,22 +17,22 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 
 | ルール | 読み込まれる状況 |
 | --- | --- |
-| `cloudflare-cf-cli` | Cloudflare のリソースをコマンドラインで操作・自動化するとき |
+| `cloudflare-cf-cli` | Cloudflare のリソースをコマンドラインで操作するとき、運用を自動化するとき |
 | `cloudflare-pages-private-admin` | Cloudflare Pages の公開アプリに非公開の管理ツールを併設するとき |
-| `library-license` | 外部ライブラリやパッケージを導入・更新・転用するとき |
+| `library-license` | 外部ライブラリやパッケージを導入、更新、転用するとき |
 | `merge-detected-sleep` | 自分が作成した PR のマージイベントを検知したとき |
 | `region-near-japan` | クラウドリソースのリージョンを選ぶとき |
 | `register-to-devin-plugins` | 再利用可能なルールやスキルを作成したとき |
 | `scoped-secret-provisioning` | ユーザーにシークレットの登録を依頼するとき |
 | `session-phase-split` | 開発フェーズが切り替わるとき、セッションの作業が長期化したとき |
-| `test-conventions` | テストコードを作成・修正するとき、テスト結果を報告するとき |
-| `ui-mock-first` | ユーザー操作を伴う UI の開発・テストをするとき |
+| `test-conventions` | テストコードの作成や修正、テスト結果の報告をするとき |
+| `ui-mock-first` | ユーザー操作を伴う UI の開発やテストをするとき |
 | `verify-file-writes` | マルチバイト文字を含むファイルの作成や文書編集のあと |
 
 ### スキル
 
 `skills/<name>/SKILL.md` はスキル本体。
-呼び出されたときに読まれる手順書・知識。
+呼び出されたときに読まれる手順書や知識。
 
 | スキル | 内容 |
 | --- | --- |
@@ -42,9 +42,9 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `devin-review-triage` | Devin Review の指摘のトリアージと対応 |
 | `japanese-tech-writing` | 日本語技術文書の文章規範と機械検査リンター |
 | `parallel-child-implementation` | 改善群の子セッションへの並列分割と依頼方法 |
-| `plugin-authoring` | このリポジトリへのルール・スキルの追加手順 |
+| `plugin-authoring` | このリポジトリへのルールやスキルの追加手順 |
 | `repo-drift-audit` | 文書やテスト資産とコードの乖離の網羅監査 |
-| `requirements-definition` | 要件定義・仕様確定の進め方 |
+| `requirements-definition` | 要件定義や仕様確定の進め方 |
 | `user-work-runbook` | ユーザーが手作業で行う運用の手順書作成 |
 | `windows-blueprint` | Windows 向け blueprint の作成とデバッグ |
 
