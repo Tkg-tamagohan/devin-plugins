@@ -49,7 +49,9 @@
 
 ## 注意
 
-- 計画書は `upload_attachment` で URL を取得し、実装子のプロンプト末尾に `ATTACHMENT:"<url>"` マーカーを付けて渡す。
+- 計画書は `upload_attachment` で URL を取得し、`devin_session_create` の `attachment_urls` に列挙して渡す。
+  - プロンプト本文に URL を書くだけでは子はファイルを開けない。
+- 添付の作法は `managing-child-sessions` に委ねる。
 - 実装子への自己 sleep 指示は同時起動スロットを即時解放するためのものである。
   - ワークフローの `agent()` 経由では `suspended` が失敗扱いになる点に注意する。
   - 詳細は `parallel-child-implementation` の「運用上の注意」を参照。

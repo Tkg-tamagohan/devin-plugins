@@ -28,11 +28,11 @@ description: devin-plugins(shared-skills プラグイン)にルールやスキ�
    - `<name>` はファイル名(skill ならディレクトリ名)と frontmatter の `name` を一致させ、小文字英数字と `-` だけを使う。
 5. 作成した内容を `guidelines.md` のチェックリストで点検する。
    - 特に description は、モデルが読むかどうかを決める唯一の材料なので、読み込むべき状況が一文で特定できることを確認する。
-   機械化できる項目は `scripts/check_plugin.py` の実行でも確認できる。
-   description の状況特定など判断が要る項目は引き続き目視で確認する。
-6. `.devin-plugin/plugin.json` の `version` を、追加と修正はパッチ、既存ファイルの移動、改名、削除を含む変更はマイナーで上げる。
+   - 機械化できる項目は `scripts/check_plugin.py` の実行でも確認できる。
+   - description の状況特定など判断が要る項目は引き続き目視で確認する。
+6. `.devin-plugin/plugin.json` の `version` を `guidelines.md` の「変更の運用」に従って上げる。
 7. `README.md` の収録一覧や構成の説明に影響する変更(ルールやスキルの追加、ディレクトリ追加、ファイルの改名など)があれば追随させる。
-8. ブランチを切って(例: `devin/add-skill-<name>`)コミットし、PR を作成する。
+8. ブランチを切って(例: `devin/$(date +%s)-<slug>`)コミットし、PR を作成する。
    - PR 本文には置き場所と粒度の判断理由を書く。
    - PR では CI の `plugin-checks` がテストと構造チェックを実行する。
 9. PR 作成後、マージとプラグインの再インデックスが済むまで他のセッションから使えないことをユーザーへ伝える。
