@@ -81,7 +81,7 @@ def read_version(root: Path) -> str:
 
 
 class TestScaffoldRule(unittest.TestCase):
-    """rule の scaffold(NE-01..NE-05)"""
+    """rule の scaffold(NE-01〜NE-05、NE-15、NE-16)"""
 
     def setUp(self):
         self.root = make_fixture()
@@ -127,6 +127,25 @@ class TestScaffoldRule(unittest.TestCase):
         # rules/ 側の新規作成でも skills/aaa-skill と衝突する
         with self.assertRaises(new_entry.EntryError):
             new_entry.scaffold(self.root, "rule", "aaa-skill", "説明", "base")
+
+    def test_ne_15_base未解決でも生成は行いversionは据え置く(self):
+        messages = new_entry.scaffold(self.root, "rule", "nb-rule", "説明", "no-such-ref")
+        self.assertTrue((self.root / "rules" / "nb-rule.md").is_file())
+        self.assertEqual("1.2.3", read_version(self.root))
+        self.assertTrue(any("WARN" in m for m in messages))
+
+    def test_ne_16_version不正なら変更を残さない(self):
+        bad = {"name": "shared-skills", "version": "0.2.x", "description": "t"}
+        (self.root / ".devin-plugin" / "plugin.json").write_text(
+            json.dumps(bad, indent=2) + "\n", encoding="utf-8"
+        )
+        with self.assertRaises(new_entry.EntryError):
+            new_entry.scaffold(self.root, "rule", "bad-ver", "説明", "base")
+        self.assertFalse((self.root / "rules" / "bad-ver.md").exists())
+        self.assertNotIn(
+            "bad-ver",
+            (self.root / "README.md").read_text(encoding="utf-8"),
+        )
 
 
 class TestScaffoldSkill(unittest.TestCase):
@@ -213,10 +232,10 @@ class TestVersionBump(unittest.TestCase):
         self.assertEqual("1.2.4", read_version(self.root))
         self.assertIn("のまま", msg)
 
-    def test_ne_14_base未解決でも現在値起点で上げる(self):
-        msg, warn = new_entry.sync_version(self.root, "no-such-ref")
-        self.assertIsNotNone(warn)
-        self.assertEqual("1.2.4", read_version(self.root))
+    def test_ne_14_base未解決はエラー(self):
+        with self.assertRaises(new_entry.EntryError):
+            new_entry.sync_version(self.root, "no-such-ref")
+        self.assertEqual("1.2.3", read_version(self.root))
 
 
 if __name__ == "__main__":

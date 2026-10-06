@@ -23,6 +23,7 @@ plugin-authoring の手順のうち、判断を要しない機械的な工程を
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -121,38 +122,54 @@ def required_level(root: Path, base_ref: str) -> Optional[str]:
     return "patch"
 
 
-def sync_version(root: Path, base_ref: str, min_level: str = "patch") -> Tuple[str, Optional[str]]:
-    """version を差分が要求する水準に合わせる。
+def plan_version(
+    root: Path, base_ref: str, min_level: str = "patch", *, strict_base: bool = True
+) -> Tuple[Optional[str], Optional[str]]:
+    """差分から必要なバンプを計画し、(新 version または据え置きの None, 警告文) を返す。
 
-    戻り値は (報告文, 警告文または None)。base が解決できないときは
-    HEAD 上の version を基点にし、未バンプの場合だけ min_level で上げる。
+    base_ref を解決できないとき、strict_base では EntryError、そうでなければ
+    警告を返して version を変更しない(自動バンプは再実行で版が進み続ける
+    ため、基準不明のまま上げない)。
+    plugin.json の version が SemVer でなければ常に EntryError。
     """
     level = required_level(root, base_ref)
-    warn = None
     if level is None:
-        warn = f"{base_ref} との差分を取得できなかったため {min_level} として扱います"
+        if strict_base:
+            raise EntryError(
+                f"{base_ref} との差分を取得できません"
+                "(--base に基準となる ref を指定してください)"
+            )
         level = min_level
     if BUMP_ORDER.index(min_level) > BUMP_ORDER.index(level):
         level = min_level
 
     current = read_version(root)
     base_v = version_at_ref(root, base_ref)
-    if base_v is not None:
-        target = bumped(base_v, level)
-        if semver_tuple(current) < semver_tuple(target):
-            write_version(root, target)
-            return (f"plugin.json: version {current} -> {target}", warn)
-        return (f"plugin.json: version {current} のまま(必要水準 {target} 以上)", warn)
-
-    committed = version_at_ref(root, "HEAD")
-    if committed is not None and semver_tuple(current) != semver_tuple(committed):
+    if base_v is None:
+        if strict_base:
+            raise EntryError(
+                f"{base_ref} の plugin.json を解決できません"
+                "(--base に基準となる ref を指定してください)"
+            )
         return (
-            f"plugin.json: version {current} のまま(HEAD から既に変更済み、base 未解決)",
-            warn,
+            None,
+            f"{base_ref} を解決できないため version は変更しません。"
+            "PR を出す前に `new_entry.py bump --base <ref>` を実行してください",
         )
-    target = bumped(current, level)
+    target = bumped(base_v, level)
+    if semver_tuple(current) >= semver_tuple(target):
+        return (None, None)
+    return (target, None)
+
+
+def sync_version(root: Path, base_ref: str, min_level: str = "patch") -> Tuple[str, Optional[str]]:
+    """version を差分が要求する水準に合わせ、(報告文, 警告文) を返す。"""
+    target, warn = plan_version(root, base_ref, min_level, strict_base=True)
+    current = read_version(root)
+    if target is None:
+        return (f"plugin.json: version {current} のまま(必要水準を満たす)", warn)
     write_version(root, target)
-    return (f"plugin.json: version {current} -> {target}(base 未解決のため現在値起点)", warn)
+    return (f"plugin.json: version {current} -> {target}", warn)
 
 
 # --- README 収録一覧 ---
@@ -226,7 +243,8 @@ def validate_summary(summary: str) -> None:
 
 def scaffold(root: Path, kind: str, name: str, summary: str, base_ref: str) -> List[str]:
     """テンプレート複写、README 行挿入、version バンプを行い、報告文を返す"""
-    # 変更を加える前に検査をすべて済ませ、失敗時に中途半端な状態を残さない
+    # 検査と version の計画を書き込みより先に済ませ、失敗時に中途半端な
+    # 状態を残さない。base を解決できないときは version を据え置いて警告する。
     validate_new_name(root, name)
     validate_summary(summary)
     if readme_has_name(root, kind, name):
@@ -236,23 +254,42 @@ def scaffold(root: Path, kind: str, name: str, summary: str, base_ref: str) -> L
     if not template.is_file():
         raise EntryError(f"テンプレート {TEMPLATES_DIR / (kind + '-template.md')} がありません")
     text = template.read_text(encoding="utf-8")
+    target_version, warn = plan_version(root, base_ref, "patch", strict_base=False)
 
+    readme_path = root / README_PATH
+    readme_backup = readme_path.read_text(encoding="utf-8")
+    created: List[Path] = []
     messages = []
-    if kind == "rule":
-        dest = root / "rules" / f"{name}.md"
-        dest.write_text(text, encoding="utf-8")
-        messages.append(f"作成: rules/{name}.md")
-    else:
-        skill_dir = root / "skills" / name
-        skill_dir.mkdir()
-        text = re.sub(r"(?m)^name:.*$", f"name: {name}", text, count=1)
-        dest = skill_dir / "SKILL.md"
-        dest.write_text(text, encoding="utf-8")
-        messages.append(f"作成: skills/{name}/SKILL.md")
+    try:
+        if kind == "rule":
+            dest = root / "rules" / f"{name}.md"
+            dest.write_text(text, encoding="utf-8")
+            created.append(dest)
+            messages.append(f"作成: rules/{name}.md")
+        else:
+            skill_dir = root / "skills" / name
+            skill_dir.mkdir()
+            created.append(skill_dir)
+            text = re.sub(r"(?m)^name:.*$", f"name: {name}", text, count=1)
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+            messages.append(f"作成: skills/{name}/SKILL.md")
 
-    messages.append(insert_readme_row(root, kind, name, summary))
-    version_msg, warn = sync_version(root, base_ref, "patch")
-    messages.append(version_msg)
+        messages.append(insert_readme_row(root, kind, name, summary))
+        if target_version is not None:
+            old_version = read_version(root)
+            write_version(root, target_version)
+            messages.append(f"plugin.json: version {old_version} -> {target_version}")
+        else:
+            messages.append(f"plugin.json: version {read_version(root)} のまま")
+    except Exception:
+        # 途中失敗で残ると再実行が重複扱いになるため、作成分と README を戻す
+        readme_path.write_text(readme_backup, encoding="utf-8")
+        for path in reversed(created):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        raise
     if warn:
         messages.append(f"[WARN] {warn}")
     messages.append(
