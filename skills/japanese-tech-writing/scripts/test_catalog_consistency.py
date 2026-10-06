@@ -24,9 +24,11 @@ ID は CAT-連番。方向1(カタログの各表現がリントで検出され�
 上記で検出できない項目は EXEMPTIONS に「項目 -> 免除理由」として列挙する。
 理由のない免除はテストが弾くため、カタログ側に表現を増やすか理由を書く。
 
-方向2 は逆方向の担保で、リント側の SLOP_WORDS の各語と各検出パターンが
-カタログ本文に現れ、パターンがカタログ内の用例・語彙のどれかに一致することを
-確認する。リントにあってカタログにない項目はカタログを正規化して足す。
+方向2 は逆方向の担保で、リント側の SLOP_WORDS の各語と全検出パターン
+(比喩動詞、フィラー、対比構文、ダッシュ)が、節ごとの抽出規則が拾う表の
+セル(太字・バッククォート・「」引用)に現れることを確認する。
+導入文や修正方針への言及だけでは掲載とみなさない。
+リントにあってカタログにない項目はカタログを正規化して足す。
 """
 
 import re
@@ -199,11 +201,7 @@ class TestCatalogCoverage(unittest.TestCase):
         self.assertEqual(sorted(set(failures)), [])
 
     def test_cat_04_免除マニフェストは理由つきで現存する項目のみ(self):
-        covered = []
-        for sec in catalog_sections():
-            for cells in table_rows(sec["lines"]):
-                for cell in cells:
-                    covered += backquoted(cell) + bold_terms(cell) + quoted(cell)
+        covered = covered_expressions()
         text = catalog_text()
         for key, reason in EXEMPTIONS.items():
             self.assertTrue(reason, f"{key} の免除理由が空")
@@ -213,16 +211,28 @@ class TestCatalogCoverage(unittest.TestCase):
             )
 
 
+def covered_expressions() -> list:
+    """表のセルから抽出した検出対象の表現一式(太字・バッククォート・「」引用)"""
+    covered = []
+    for sec in catalog_sections():
+        for cells in table_rows(sec["lines"]):
+            for cell in cells:
+                covered += backquoted(cell) + bold_terms(cell) + quoted(cell)
+    return covered
+
+
 class TestLintCoverage(unittest.TestCase):
     """方向2: リントの検出対象がすべてカタログに記載される"""
 
-    def test_cat_05_スロップ語彙はカタログに記載される(self):
-        text = catalog_text()
-        missing = [w for w in SLOP_WORDS if w not in text]
+    def test_cat_05_スロップ語彙はカタログの検出対象列に記載される(self):
+        # 導入文や修正方針への言及だけでは掲載とみなさず、
+        # 節ごとの抽出規則が拾う表のセルに現れることを要求する
+        covered = covered_expressions()
+        missing = [w for w in SLOP_WORDS if not any(w in expr for expr in covered)]
         self.assertEqual(missing, [])
 
     def test_cat_06_比喩動詞パターンはカタログの用例を検出する(self):
-        usages = quoted(catalog_text()) + backquoted(catalog_text())
+        usages = covered_expressions()
         failures = []
         for pattern, desc in METAPHOR_VERB_PATTERNS:
             if not any(re.search(pattern, u) for u in usages):
@@ -230,10 +240,22 @@ class TestLintCoverage(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_cat_07_フィラーパターンはカタログの用例を検出する(self):
-        usages = quoted(catalog_text()) + backquoted(catalog_text())
+        usages = covered_expressions()
         failures = []
         for pattern, desc in FILLER_PATTERNS:
             if not any(re.search(pattern, u) for u in usages):
+                failures.append(desc)
+        self.assertEqual(failures, [])
+
+    def test_cat_08_対比構文とダッシュのパターンも用例を検出する(self):
+        usages = covered_expressions()
+        checks = [
+            (NEGATIVE_PARALLELISM_PATTERN, "対比構文「ではなく」"),
+            (DASH_PATTERN, "ダッシュ囲みの挿入"),
+        ]
+        failures = []
+        for pattern, desc in checks:
+            if not any(pattern.search(u) for u in usages):
                 failures.append(desc)
         self.assertEqual(failures, [])
 
