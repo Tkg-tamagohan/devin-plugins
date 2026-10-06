@@ -57,12 +57,14 @@ AGENTS.md                          # 全セッションに常時適用される�
 LICENSE                            # MIT License
 rules/<name>.md                    # トリガー付きルール(description に合う状況のセッションでのみ本文が読まれる)
 skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
-skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート
+skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、構造チェック(scripts/check_plugin.py)
+.github/workflows/plugin-checks.yml # リンターの回帰テストと構造チェックを実行する CI
 ```
 
 ルールやスキルをどこに置くか、どの粒度で分けるかの基準は `skills/plugin-authoring/guidelines.md` にまとめている。
 新しく追加するときは、スキル `shared-skills:plugin-authoring` の手順に従う。
 `rules/register-to-devin-plugins.md` により、セッション中に再利用可能なルールやスキルを作成した Devin はこのリポジトリへの追加 PR を自動で作る。
+PR では CI(`plugin-checks`) がスロップリンターの回帰テストと `check_plugin.py` による構造チェック(命名、frontmatter、「対象外」の有無、行数、README との同期、plugin.json の version 更新)を実行する。
 
 ## インストール / 更新
 
