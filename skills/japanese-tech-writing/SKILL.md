@@ -166,8 +166,9 @@ devin-plugins リポジトリで複数の文書を一括検査するときは、
 ```bash
 status=0
 while IFS= read -r -d '' f; do
-  src=$(git -c core.excludesFile=.sloplintignore check-ignore --no-index -v -- "$f")
-  case $src in .sloplintignore:*) continue ;; esac
+  if src=$(git -c core.excludesFile=.sloplintignore check-ignore --no-index -v -- "$f"); then
+    case $src in .sloplintignore:*) continue ;; esac
+  fi
   python3 skills/japanese-tech-writing/scripts/slop_lint.py "$f" || status=1
 done < <(git ls-files -z -- '*.md')
 exit $status
