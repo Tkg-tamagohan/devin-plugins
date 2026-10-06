@@ -1,6 +1,6 @@
 ---
 name: cf-cli
-description: Cloudflare の公式 CLI `cf` の実行方法、認証、コマンドの探し方、wrangler との使い分けを扱う。Cloudflare のリソースをコマンドラインから操作するとき、Pages や Access などの設定を確認・変更するときに使用する。リージョンの選定は region-near-japan に委ねる。
+description: Cloudflare の公式 CLI `cf` の実行方法、認証、コマンドの探し方、wrangler との使い分けを扱う。Cloudflare のリソースをコマンドラインから操作するとき、Pages や Access などの設定を確認または変更するときに使用する。リージョンの選定は region-near-japan に委ねる。
 ---
 
 # Cloudflare CLI `cf`
@@ -11,11 +11,12 @@ Cloudflare の運用を、REST API を個別に組み立てることなく完結
 
 ## 責任範囲の境界
 
-- **リージョン選定**：リソースの作成・移行でリージョンを選ぶ判断は `region-near-japan` に委ねる。本スキルは CLI の使い方だけを扱う。
+- **リージョン選定**：リソースの作成や移行でリージョンを選ぶ判断は `region-near-japan` に委ねる。
+  - 本スキルは CLI の使い方だけを扱う。
 
 ## 実行方法
 
-`cf` は npm パッケージとして配布される。グローバルインストールはせず、`npx` でバージョンを指定して実行する。
+`cf` は npm パッケージとして配布され、グローバルインストールはせず `npx` でバージョンを指定して実行する。
 
 ```bash
 npx -y cf@1.0.0-beta.5 <command>
@@ -65,7 +66,8 @@ D1、R2、DNS なども同様にサブコマンドで扱う。
 ## wrangler との使い分け
 
 - ad-hoc な運用、参照、設定変更：`cf` を使う。
-- 稼働中のデプロイパイプライン(`cloudflare/wrangler-action`、`wrangler pages deploy` など)：wrangler のまま維持する。`cf` が stable になった時点で移行を検討する。
+- 稼働中のデプロイパイプライン(`cloudflare/wrangler-action`、`wrangler pages deploy` など)：wrangler のまま維持する。
+  - `cf` が stable になった時点で移行を検討する。
 - `cloudflare.config.ts` と Vite 連携は Worker 向けの機能であり、静的サイトだけを Pages に置く構成では現時点で恩恵が薄い。
 
 ## 原則
