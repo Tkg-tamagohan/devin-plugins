@@ -155,6 +155,25 @@ AI が生成した文章や、機械検査で指摘の多い文章を書き直�
 python3 <スキルのディレクトリ>/scripts/slop_lint.py <対象ファイル>
 ```
 
+devin-plugins リポジトリで複数の文書を一括検査するときは、リポジトリ直下の `.sloplintignore` が検査対象の除外を管理する。
+このファイルは gitignore 形式のパス一覧であり、検査対象から除くパスを変えたいときは 1 行 1 件でパスを足すか削る。
+`references/slop-catalog.md` は悪い表現を列挙する辞書であり、目的上の言及が規範抵触として検出されるため恒久除外としている。
+
+次のコマンドで、`.sloplintignore` の除外を適用した対象の一覧を得られる。
+
+```bash
+git ls-files -- '*.md' $(grep -vE '^\s*(#|$)' .sloplintignore | sed 's/^/:(exclude)/')
+```
+
+一覧の各ファイルへリンターを適用すれば一括検査になる。
+
+```bash
+git ls-files -- '*.md' $(grep -vE '^\s*(#|$)' .sloplintignore | sed 's/^/:(exclude)/') \
+  | while IFS= read -r f; do
+      python3 skills/japanese-tech-writing/scripts/slop_lint.py "$f"
+    done
+```
+
 - 検出結果は機械的な見直し候補である。本規範で正当な記述（定義語の太字、定義列挙の箇条書き、「」による言及、必要な推量表現、文脈上正当な専門用語など）に対する指摘は、本規範を優先して保持する。
 - 太字頻度と箇条書き比率の指摘は情報（info）として出る。文書全体の装飾傾向を把握する目安として使い、本規範が許容する記法で閾値を超えているだけなら修正しない。
 - 修正の試行は最大二回までとし、警告を消すためだけの過剰な言い換えループを避ける。
