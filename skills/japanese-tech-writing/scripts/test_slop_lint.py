@@ -213,6 +213,20 @@ class TestOneSentencePerLine(unittest.TestCase):
             rules_of("この[手順](https://example.com)を実行します。"),
         )
 
+    def test_line_10_文末の参照リンクは一文のままとする(self):
+        # 文の終わりに資料名だけのリンクを添える形は一文扱い
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("詳細は正しいです。[参考](https://example.com)"),
+        )
+
+    def test_line_11_文中の画像は一文の一部とする(self):
+        # 代替テキストは表示文ではないため、その句点は文数に数えない
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("これは![画面。](image.png)を示します。"),
+        )
+
 
 class TestHeadingDecoration(unittest.TestCase):
     """見出しの罫線(U+2500)の検出。整形規範「見出しに区切り線で二要素を詰め込まない」に対応"""
