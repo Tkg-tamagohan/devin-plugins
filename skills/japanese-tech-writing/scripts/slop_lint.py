@@ -14,6 +14,7 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 - 「〜に他なりません」の検出が波線の直前に限られていた問題を修正
 - 「」で囲まれた言及(禁止表現の例示)を語彙・構文検査の対象から除外
 - 助詞「の」で数珠つなぎになった名詞連結(過圧縮)の検出を追加
+- 中黒(・)の日本語並列、一行の複数文、見出しの罫線(U+2500)の検出を追加
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -42,9 +43,25 @@ EMOJI_PATTERN = re.compile(
     r"|[\u2B50-\u2B55]"
 )
 
-# ダッシュ記号(em ダッシュ、horizontal bar、2 倍ダッシュ)。
+# ダッシュ記号(em ダッシュ、horizontal bar、2 倍ダッシュ)と罫線(U+2500)。
 # 範囲を示す en ダッシュ(U+2013)は対象外。
-DASH_PATTERN = re.compile(r"[—―]|——")
+DASH_PATTERN = re.compile(r"[—―─]|——")
+
+# 中黒(・)による日本語の並列。「作成・推敲」のような列挙を拾う。
+# セグメントは同一文字種のランに限る。混在させると「ウォルト・ディズニーの作品」で
+# 後続の「の作品」まで連結に吸収され、固有名詞まで並列と誤認するため。
+# 二要素かつ両側がカタカナのみの場合は「ウォルト・ディズニー」のような
+# 単一固有名詞の可能性が高いため検査側で除外する(「メール・電話」のような
+# 実際の並列も見逃しうるが、誤検出を避けることを優先した)。
+NAKAGURO_SEGMENT = r"(?:[ァ-ヶー]+|[一-龯]+|[ぁ-ん]+|[0-9A-Za-z]+)"
+NAKAGURO_ENUM_PATTERN = re.compile(
+    NAKAGURO_SEGMENT + r"(?:[・･]" + NAKAGURO_SEGMENT + r")+"
+)
+KATAKANA_ONLY_PATTERN = re.compile(r"[ァ-ヶー]+")
+
+# 一行に複数の文がある形。文末記号の直後に文末記号・閉じ括弧類・空白以外が
+# 続けば、その行には二文以上があるとみなす。
+SENTENCE_SPLIT_PATTERN = re.compile(r"[。！？](?![。！？」）』\s]*$)")
 
 # AI 頻出語彙リスト。文脈上正当な専門用語(医学の「体温」、画像処理の
 # 「解像度」、化学の「触媒」など)であれば保持する。
@@ -311,13 +328,50 @@ def lint_text(text: str) -> Dict[str, Any]:
     open_fence = None
     fm_lines = get_frontmatter_line_count(lines)
     for line_no, line in enumerate(lines, 1):
-        if line_no <= fm_lines:
-            continue
         stripped = line.strip()
         prev_fence = open_fence
         open_fence = update_code_fence(stripped, open_fence)
         if prev_fence is not None or open_fence is not None:
             continue
+
+        # 記号だけで判定できる検査はフロントマター・見出し・表行を含む全行が対象。
+        # 「」の言及とインラインコードは区切り(全角空白)に置き換えて誤検出を防ぐ。
+        masked_text = re.sub(r"`[^`]+`", "　", stripped)
+        masked_text = re.sub(r"「[^」]*」", "　", masked_text)
+        masked_text = re.sub(r"\*\*|\*|__", "", masked_text)
+
+        # 中黒による並列(本スキルの整形規範。固有名詞の内部は例外)
+        for m in NAKAGURO_ENUM_PATTERN.finditer(masked_text):
+            segments = re.split(r"[・･]", m.group(0))
+            if len(segments) == 2 and all(KATAKANA_ONLY_PATTERN.fullmatch(s) for s in segments):
+                continue
+            findings.append({
+                "rule": "nakaguro_parallel",
+                "line": line_no,
+                "severity": "warn",
+                "message": "中黒(・)の並列が検出されました。読点や「や」「と」などに書き直してください。単一の固有名詞の内部は対象外です。",
+                "snippet": line.strip()
+            })
+            break
+
+        if line_no <= fm_lines:
+            continue
+
+        # 一文一行(本スキルの整形規範)。引用・表・画像・HTML 行は対象外
+        is_quote_or_table = stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<")
+        if not is_quote_or_table:
+            sent_text = re.sub(r"`[^`]+`", "", stripped)
+            sent_text = re.sub(r"「[^」]*」", "", sent_text)
+            sent_text = re.sub(r"（[^（）。！？]*）", "", sent_text)
+            sent_text = re.sub(r"\*\*|\*|__", "", sent_text)
+            if SENTENCE_SPLIT_PATTERN.search(sent_text):
+                findings.append({
+                    "rule": "one_sentence_per_line",
+                    "line": line_no,
+                    "severity": "warn",
+                    "message": "一行に複数の文が含まれています。一文ごとに改行してください。",
+                    "snippet": line.strip()
+                })
 
         # 絵文字検知(見出し・本文問わず禁止)
         emoji_matches = EMOJI_PATTERN.findall(line)
@@ -356,7 +410,7 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "rule": "dash_prohibited",
                     "line": line_no,
                     "severity": "warn",
-                    "message": "見出しにダッシュ記号(—、―、——)が含まれています。単一の自然な句に書き直してください。",
+                    "message": "見出しにダッシュ・罫線記号(—、―、——、─)が含まれています。単一の自然な句に書き直してください。",
                     "snippet": line.strip()
                 })
             continue
@@ -378,7 +432,7 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "rule": "dash_prohibited",
                 "line": line_no,
                 "severity": "warn",
-                "message": "ダッシュ記号(—、―、——)が検出されました。挿入は括弧へ、言い換えは句点や読点へ書き直してください。",
+                "message": "ダッシュ・罫線記号(—、―、——、─)が検出されました。挿入は括弧へ、言い換えは句点や読点へ書き直してください。",
                 "snippet": line.strip()
             })
 

@@ -1,0 +1,32 @@
+name: plugin-checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: スロップリンターの回帰テスト
+        working-directory: skills/japanese-tech-writing/scripts
+        run: python3 test_slop_lint.py
+
+      - name: プラグイン構造チェック
+        run: python3 skills/plugin-authoring/scripts/check_plugin.py
+
+      - name: plugin.json バージョン更新チェック
+        if: github.event_name == 'pull_request'
+        run: python3 skills/plugin-authoring/scripts/check_plugin.py --version-base origin/${{ github.base_ref }}

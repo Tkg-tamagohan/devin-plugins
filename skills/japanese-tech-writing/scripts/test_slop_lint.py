@@ -1,7 +1,8 @@
 """slop_lint の回帰テスト
 
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
-ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持。
+ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
+NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -97,6 +98,102 @@ class TestSentenceEndRepetition(unittest.TestCase):
         self.assertNotIn(
             "sentence_end_repetition",
             rules_of(text),
+        )
+
+
+class TestNakaguroParallel(unittest.TestCase):
+    """中黒(・)の日本語並列の検出。整形規範「中黒を日本語の並列で使わない」に対応"""
+
+    def test_naka_01_漢字の並列は検出する(self):
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("修正したら確認・遵守してください。"),
+        )
+
+    def test_naka_02_カタカナのみの二要素は単一固有名詞として除外する(self):
+        self.assertNotIn(
+            "nakaguro_parallel",
+            rules_of("ウォルト・ディズニーの作品を見た。"),
+        )
+
+    def test_naka_03_三要素以上の並列はカタカナでも検出する(self):
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("作成・推敲・公開の順で進める。"),
+        )
+
+    def test_naka_04_言及の内部の中黒は検出しない(self):
+        self.assertNotIn(
+            "nakaguro_parallel",
+            rules_of("「作成・推敲」は禁止表現の例です。"),
+        )
+
+    def test_naka_05_表行の並列も検出する(self):
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("| 項目 | 内容 |\n| --- | --- |\n| 変更 | 作成・修正 |"),
+        )
+
+    def test_naka_06_インラインコードをまたぐ偽の並列は検出しない(self):
+        self.assertNotIn(
+            "nakaguro_parallel",
+            rules_of("値は `a`・`b` のどちらかを取る。"),
+        )
+
+
+class TestOneSentencePerLine(unittest.TestCase):
+    """一行に複数の文がある形の検出。整形規範「一文ごとに改行する」に対応"""
+
+    def test_line_01_一行の複数文は検出する(self):
+        self.assertIn(
+            "one_sentence_per_line",
+            rules_of("値は正しいです。形式も正しいです。"),
+        )
+
+    def test_line_02_改行済みの複数文は検出しない(self):
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("値は正しいです。\n形式も正しいです。"),
+        )
+
+    def test_line_03_言及内の複数文は検出しない(self):
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("「値は正しいです。形式も正しいです」という文を引用する。"),
+        )
+
+    def test_line_04_箇条書き内の複数文も検出する(self):
+        self.assertIn(
+            "one_sentence_per_line",
+            rules_of("- 値は正しいです。形式も正しいです。"),
+        )
+
+    def test_line_05_文を含まない括弧だけの後続は検出しない(self):
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("値は正しいです。（後述）"),
+        )
+
+    def test_line_06_表行の複数文は対象外とする(self):
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("| 項目 | 内容 |\n| --- | --- |\n| 結果 | 正しいです。確認済みです。 |"),
+        )
+
+
+class TestHeadingDecoration(unittest.TestCase):
+    """見出しの罫線(U+2500)の検出。整形規範「見出しに区切り線で二要素を詰め込まない」に対応"""
+
+    def test_head_01_見出しの罫線は検出する(self):
+        self.assertIn(
+            "dash_prohibited",
+            rules_of("# 種別─主題"),
+        )
+
+    def test_head_02_本文の罫線も検出する(self):
+        self.assertIn(
+            "dash_prohibited",
+            rules_of("種別─主題のように並べない。"),
         )
 
 
