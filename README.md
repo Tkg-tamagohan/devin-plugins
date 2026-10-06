@@ -44,7 +44,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `output-format-escalation` | 説明や調査の成果物の出力形式の選択(制約付き文章、図、インタラクティブ HTML) |
 | `parallel-child-implementation` | 改善群の子セッションへの並列分割と依頼方法 |
 | `plugin-authoring` | このリポジトリへのルールやスキルの追加手順 |
-| `repo-drift-audit` | 文書やテスト資産とコードの乖離の網羅監査 |
+| `repo-drift-audit` | 文書やテスト資産とコードの乖離と手順の機械化余地の網羅監査 |
 | `requirements-definition` | 要件定義や仕様確定の進め方 |
 | `user-work-runbook` | ユーザーが手作業で行う運用の手順書作成 |
 | `windows-blueprint` | Windows 向け blueprint の作成とデバッグ |
