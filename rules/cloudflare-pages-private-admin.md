@@ -11,9 +11,10 @@ description: Cloudflare Pages の公開アプリに非公開の管理ツール�
 ## 手順
 
 1. 保護対象を別 Pages プロジェクトとしてデプロイする。
-2. Cloudflare Access（Self-hosted アプリケーション）でそのドメインを保護する。設定手順はスキル `shared-skills:cloudflare-access-setup` に従う。
+2. スキル `shared-skills:cloudflare-access-setup` の手順で、Cloudflare Access（Self-hosted アプリケーション）を用いてそのドメインを保護する。
 
 ## 対象外
 
-- サーバーサイドで認証判定を持つアプリ（SSR、API）。すり抜けはクライアント側ルーティングに起因する。
+- サーバーサイドで認証判定を持つアプリ（SSR、API）
+  - すり抜けはクライアント側ルーティングに起因する。
 - IP 制限などネットワークレベルの制御で足りる場合。
