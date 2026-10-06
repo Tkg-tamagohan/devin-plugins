@@ -5,7 +5,7 @@ description: Windows プラットフォーム向け blueprint の作成とデバ
 
 # Windows blueprint の作成とデバッグ
 
-Windows プラットフォーム向けの blueprint を書く・直すとき、およびスナップショットビルドの失敗を調査するときは、以下の知識に従う。
+Windows プラットフォーム向けの blueprint を書いたり直したりするとき、およびスナップショットビルドの失敗を調査するときは、以下の知識に従う。
 
 ## ステップは Git Bash で実行される
 
@@ -57,11 +57,11 @@ PATH 系の値には Git Bash 形式(`/c/dotnet`)、ツールやアプリが読�
 
 ## スナップショットビルド失敗の調査
 
-1. `read_build_logs` でビルドジョブ一覧を見るか、`sbj-...` 形式のジョブ ID を渡してログを取得する。完全な JSONL ログがマシン上のファイルに保存される。
+1. `read_build_logs` でビルドジョブ一覧を見るか、`sbj-...` 形式のジョブ ID を渡してログを取得すると、完全な JSONL ログがマシン上のファイルに保存される。
 2. ログから失敗したステップとコマンド、exit code を特定する。
 3. セッション VM が同じプラットフォームなら、失敗したコマンドを再現し、修正版コマンドをその場で検証する。
 4. `read_environment_config` で現在の blueprint を取得し、`update_environment_config` で修正案を提案する。
-5. 提案が approve されると自動で再ビルドが走る。新しいビルドジョブの status を `read_build_logs` で確認する。
+5. 提案が approve されると自動で再ビルドが走るため、新しいビルドジョブの status を `read_build_logs` で確認する。
 
 修正後の再ビルドが再度 partial になることがある。
 先のセクションが失敗すると後続セクションは実行されないため、initialize を直すと maintenance にあった別の既存バグが初めて表面化する、という順序で不具合が一つずつ出る場合がある。
