@@ -20,7 +20,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `cloudflare-cf-cli` | Cloudflare のリソースをコマンドラインで操作するとき、運用を自動化するとき |
 | `cloudflare-pages-private-admin` | Cloudflare Pages の公開アプリに非公開の管理ツールを併設するとき |
 | `library-license` | 外部ライブラリやパッケージを導入、更新、転用するとき |
-| `merge-detected-sleep` | 自分が作成した PR のマージイベントを検知したとき |
+| `merge-detected-sleep` | 自分が作成または監視する PR のマージイベントを検知したとき |
 | `region-near-japan` | クラウドリソースのリージョンを選ぶとき |
 | `register-to-devin-plugins` | 再利用可能なルールやスキルを作成したとき |
 | `scoped-secret-provisioning` | ユーザーにシークレットの登録を依頼するとき |
@@ -55,9 +55,13 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 .devin-plugin/plugin.json          # プラグインマニフェスト(name が /<plugin>:<skill> の名前空間になる)
 AGENTS.md                          # 全セッションに常時適用される共通ルール
 LICENSE                            # MIT License
+.sloplintignore                    # 文書リントの検査対象から外すパス一覧
 rules/<name>.md                    # トリガー付きルール(description に合う状況のセッションでのみ本文が読まれる)
 skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
 skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、構造チェック(scripts/check_plugin.py)
+skills/japanese-tech-writing/scripts/    # スロップリンター(slop_lint.py)と回帰テスト
+skills/japanese-tech-writing/references/ # 悪い表現の語彙カタログ(slop-catalog.md)
+skills/repo-drift-audit/child-prompts.md # 監査で子セッションへ渡すプロンプトの定型
 .github/workflows/plugin-checks.yml # リンターの回帰テストと文書リント、構造チェックを実行する CI
 ```
 
