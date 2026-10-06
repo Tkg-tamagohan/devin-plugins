@@ -57,7 +57,7 @@ PATH 系の値には Git Bash 形式(`/c/dotnet`)、ツールやアプリが読�
 
 ## スナップショットビルド失敗の調査
 
-1. `read_build_logs` でビルドジョブ一覧を見るか、`sbj-...` 形式のジョブ ID を渡してログを取得し、完全な JSONL ログをマシン上のファイルに保存する。
+1. `read_build_logs` でビルドジョブ一覧を見るか、`sbj-...` 形式のジョブ ID を渡してログを取得すると、完全な JSONL ログがマシン上のファイルに保存される。
 2. ログから失敗したステップとコマンド、exit code を特定する。
 3. セッション VM が同じプラットフォームなら、失敗したコマンドを再現し、修正版コマンドをその場で検証する。
 4. `read_environment_config` で現在の blueprint を取得し、`update_environment_config` で修正案を提案する。
