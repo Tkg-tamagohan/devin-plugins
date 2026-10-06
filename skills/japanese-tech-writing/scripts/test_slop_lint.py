@@ -140,6 +140,19 @@ class TestNakaguroParallel(unittest.TestCase):
             rules_of("値は `a`・`b` のどちらかを取る。"),
         )
 
+    def test_naka_07_三要素の人名は固有名詞として除外する(self):
+        # 規範は単一固有名詞内の中黒を要素数にかかわらず許可する
+        self.assertNotIn(
+            "nakaguro_parallel",
+            rules_of("ジョン・フィッツジェラルド・ケネディを参照する。"),
+        )
+
+    def test_naka_08_イニシャルを含む人名も固有名詞として除外する(self):
+        self.assertNotIn(
+            "nakaguro_parallel",
+            rules_of("アーサー・C・クラークの例を挙げる。"),
+        )
+
 
 class TestOneSentencePerLine(unittest.TestCase):
     """一行に複数の文がある形の検出。整形規範「一文ごとに改行する」に対応"""
@@ -178,6 +191,19 @@ class TestOneSentencePerLine(unittest.TestCase):
         self.assertNotIn(
             "one_sentence_per_line",
             rules_of("| 項目 | 内容 |\n| --- | --- |\n| 結果 | 正しいです。確認済みです。 |"),
+        )
+
+    def test_line_07_脚注参照の後続は一文のままとする(self):
+        # 「文。[^脚注]」は一文であり、脚注は規範が推奨する記法
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("値は正しい。[^根拠]"),
+        )
+
+    def test_line_08_リンクの後続は一文のままとする(self):
+        self.assertNotIn(
+            "one_sentence_per_line",
+            rules_of("詳細は正しいです。[参考](https://example.com)"),
         )
 
 

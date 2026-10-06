@@ -30,9 +30,13 @@ from typing import List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
+SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 RULE_LINE_LIMIT = 30
 SKILL_LINE_LIMIT = 200
 AGENTS_SECTION_LINE_LIMIT = 5
+# version の意味づけ対象となるプラグイン中身のパス。これらの移動・改名・削除は
+# guidelines.md の規約上マイナーバンプを要求する
+VERSIONED_CONTENT_PATHS = ("rules", "skills", "AGENTS.md", "README.md")
 
 
 def parse_frontmatter(text: str) -> Optional[dict]:
@@ -59,8 +63,10 @@ def check_rules() -> List[str]:
         rel = path.relative_to(REPO_ROOT)
         if not NAME_PATTERN.match(path.stem):
             errors.append(f"{rel}: ファイル名が小文字英数字とハイフンのみではありません")
-        lines = path.read_text(encoding="utf-8").split("\n")
-        fm = parse_frontmatter("\n".join(lines))
+        # 末尾改行が空行として数えられて実際の行数を超過させないよう splitlines で数える
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        fm = parse_frontmatter(text)
         if fm is None:
             errors.append(f"{rel}: frontmatter がありません")
         else:
@@ -90,8 +96,9 @@ def check_skills() -> List[str]:
         if not skill_md.is_file():
             errors.append(f"{rel}: SKILL.md がありません")
             continue
-        lines = skill_md.read_text(encoding="utf-8").split("\n")
-        fm = parse_frontmatter("\n".join(lines))
+        text = skill_md.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        fm = parse_frontmatter(text)
         if fm is None:
             errors.append(f"{rel}/SKILL.md: frontmatter がありません")
         else:
@@ -114,7 +121,7 @@ def check_agents() -> List[str]:
     path = REPO_ROOT / "AGENTS.md"
     if not path.is_file():
         return ["AGENTS.md がありません"]
-    lines = path.read_text(encoding="utf-8").split("\n")
+    lines = path.read_text(encoding="utf-8").splitlines()
     section = None
     body_lines = 0
     for line in lines + ["## END"]:
@@ -131,6 +138,27 @@ def check_agents() -> List[str]:
     return errors
 
 
+def readme_table_names(readme: str, heading: str) -> set:
+    """README の指定節(### 見出し)にある表の第1列のバッククォート囲み名を集める。
+
+    収録一覧の表だけを対象にすることで、構成例や本文中の言及が
+    一覧掲載済みと誤認されるのを防ぐ。
+    """
+    names = set()
+    in_section = False
+    for line in readme.splitlines():
+        if re.match(r"^#{1,3}\s", line):
+            in_section = line.strip().startswith(heading)
+            continue
+        if in_section and line.strip().startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if cells:
+                m = re.fullmatch(r"`([^`]+)`", cells[0])
+                if m:
+                    names.add(m.group(1))
+    return names
+
+
 def check_readme() -> List[str]:
     errors = []
     path = REPO_ROOT / "README.md"
@@ -139,14 +167,16 @@ def check_readme() -> List[str]:
     readme = path.read_text(encoding="utf-8")
     rules_dir = REPO_ROOT / "rules"
     if rules_dir.is_dir():
+        listed = readme_table_names(readme, "### ルール")
         for f in sorted(rules_dir.glob("*.md")):
-            if f"`{f.stem}`" not in readme:
-                errors.append(f"README.md: ルール `{f.stem}` が収録一覧にありません")
+            if f.stem not in listed:
+                errors.append(f"README.md: ルール `{f.stem}` が収録一覧の表にありません")
     skills_dir = REPO_ROOT / "skills"
     if skills_dir.is_dir():
+        listed = readme_table_names(readme, "### スキル")
         for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-            if f"`{d.name}`" not in readme:
-                errors.append(f"README.md: スキル `{d.name}` が収録一覧にありません")
+            if d.name not in listed:
+                errors.append(f"README.md: スキル `{d.name}` が収録一覧の表にありません")
     return errors
 
 
@@ -166,7 +196,12 @@ def check_plugin_json() -> List[str]:
 
 
 def check_version_bump(base_ref: str) -> List[str]:
-    """base ref の plugin.json と version を比較し、変わっていなければエラー"""
+    """base ref と version を比較し、規約通りのバンプかを検査する
+
+    guidelines.md の規約: 追加と修正はパッチ、既存ファイルの移動・改名・削除を
+    含む変更はマイナーを上げる。等しくないことだけの確認では降格や非 SemVer の
+    任意文字列を通してしまうため、SemVer の単調増加と変更種別の整合を検査する。
+    """
     path = REPO_ROOT / ".devin-plugin" / "plugin.json"
     try:
         base_text = subprocess.run(
@@ -183,10 +218,53 @@ def check_version_bump(base_ref: str) -> List[str]:
         base = json.loads(base_text)["version"]
     except (json.JSONDecodeError, KeyError, FileNotFoundError) as e:
         return [f"plugin.json の version を比較できません({e})"]
-    if current == base:
+
+    base_m = SEMVER_PATTERN.match(base)
+    current_m = SEMVER_PATTERN.match(current)
+    if not base_m or not current_m:
+        return [
+            f"plugin.json の version が SemVer ではありません({base} -> {current})。"
+            "X.Y.Z 形式にしてください"
+        ]
+    base_t = tuple(int(g) for g in base_m.groups())
+    current_t = tuple(int(g) for g in current_m.groups())
+    if current_t == base_t:
         return [
             f"plugin.json の version が {base_ref} から変わっていません({base})。"
             "追加・修正はパッチ、移動・改名・削除を含む変更はマイナーを上げてください"
+        ]
+    if current_t < base_t:
+        return [
+            f"plugin.json の version が {base_ref} より下がっています({base} -> {current})。"
+            "version は単調増加させてください"
+        ]
+
+    # プラグイン中身の移動・改名・削除(D/R)があればマイナー以上のバンプを要求する。
+    # base...HEAD はコミット済みの差分、HEAD は未コミット分(ローカル実行の網羅用)
+    diff_out = ""
+    for diff_args in (
+        ["git", "diff", "--name-status", f"{base_ref}...HEAD", "--", *VERSIONED_CONTENT_PATHS],
+        ["git", "diff", "--name-status", "HEAD", "--", *VERSIONED_CONTENT_PATHS],
+    ):
+        try:
+            diff_out += subprocess.run(
+                diff_args,
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        except subprocess.CalledProcessError as e:
+            return [f"差分を取得できません({e.stderr.strip()})"]
+    has_structural = any(
+        line.split("\t", 1)[0].startswith(("D", "R"))
+        for line in diff_out.splitlines()
+        if line.strip()
+    )
+    if has_structural and current_t[:2] <= base_t[:2]:
+        return [
+            f"plugin.json の version が規約に合いません({base} -> {current})。"
+            "移動・改名・削除を含む変更はマイナー以上を上げてください"
         ]
     return []
 

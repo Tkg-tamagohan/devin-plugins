@@ -50,14 +50,15 @@ DASH_PATTERN = re.compile(r"[—―─]|——")
 # 中黒(・)による日本語の並列。「作成・推敲」のような列挙を拾う。
 # セグメントは同一文字種のランに限る。混在させると「ウォルト・ディズニーの作品」で
 # 後続の「の作品」まで連結に吸収され、固有名詞まで並列と誤認するため。
-# 二要素かつ両側がカタカナのみの場合は「ウォルト・ディズニー」のような
-# 単一固有名詞の可能性が高いため検査側で除外する(「メール・電話」のような
-# 実際の並列も見逃しうるが、誤検出を避けることを優先した)。
+# すべてのセグメントがカタカナまたは大写英字一文字の場合は単一固有名詞
+# (「ウォルト・ディズニー」「ジョン・フィッツジェラルド・ケネディ」のような人名)の
+# 可能性が高いため検査側で除外する。「メール・電話」やカタカナ四要素以上の列挙も
+# 見逃しうるが、固有名詞の誤検出を避けることを優先した。
 NAKAGURO_SEGMENT = r"(?:[ァ-ヶー]+|[一-龯]+|[ぁ-ん]+|[0-9A-Za-z]+)"
 NAKAGURO_ENUM_PATTERN = re.compile(
     NAKAGURO_SEGMENT + r"(?:[・･]" + NAKAGURO_SEGMENT + r")+"
 )
-KATAKANA_ONLY_PATTERN = re.compile(r"[ァ-ヶー]+")
+PROPER_NOUN_SEGMENT_PATTERN = re.compile(r"[ァ-ヶー]+|[A-Z]")
 
 # 一行に複数の文がある形。文末記号の直後に文末記号・閉じ括弧類・空白以外が
 # 続けば、その行には二文以上があるとみなす。
@@ -343,7 +344,7 @@ def lint_text(text: str) -> Dict[str, Any]:
         # 中黒による並列(本スキルの整形規範。固有名詞の内部は例外)
         for m in NAKAGURO_ENUM_PATTERN.finditer(masked_text):
             segments = re.split(r"[・･]", m.group(0))
-            if len(segments) == 2 and all(KATAKANA_ONLY_PATTERN.fullmatch(s) for s in segments):
+            if all(PROPER_NOUN_SEGMENT_PATTERN.fullmatch(s) for s in segments):
                 continue
             findings.append({
                 "rule": "nakaguro_parallel",
@@ -362,6 +363,9 @@ def lint_text(text: str) -> Dict[str, Any]:
         if not is_quote_or_table:
             sent_text = re.sub(r"`[^`]+`", "", stripped)
             sent_text = re.sub(r"「[^」]*」", "", sent_text)
+            # 脚注参照とリンクは文の終端ではないため除去(「文。[^脚注]」は一文のまま)
+            sent_text = re.sub(r"\[\^[^\]]*\]", "", sent_text)
+            sent_text = re.sub(r"\[[^\]]*\]\([^)]*\)", "", sent_text)
             sent_text = re.sub(r"（[^（）。！？]*）", "", sent_text)
             sent_text = re.sub(r"\*\*|\*|__", "", sent_text)
             if SENTENCE_SPLIT_PATTERN.search(sent_text):
