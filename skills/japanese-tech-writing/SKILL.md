@@ -158,12 +158,14 @@ python3 <スキルのディレクトリ>/scripts/slop_lint.py <対象ファイ�
 devin-plugins リポジトリで複数の文書を一括検査するときは、リポジトリ直下の `.sloplintignore` が検査対象の除外を管理する。
 このファイルは gitignore 形式のパス一覧であり、検査対象から除くパスを変えたいときは 1 行 1 件でパスを足すか削る。
 `references/slop-catalog.md` は悪い表現を列挙する辞書であり、目的上の言及が規範抵触として検出されるため恒久除外としている。
+`.gitignore` や `info/exclude` などほかの除外設定に一致する文書は検査対象のままとし、一致元が `.sloplintignore` のときだけ除外する。
 次のコマンドは、除外を適用して全対象を検査し、途中の失敗を集計して終了コードを非ゼロにする。
 
 ```bash
 status=0
 while IFS= read -r -d '' f; do
-  git -c core.excludesFile=.sloplintignore check-ignore --no-index -q "$f" && continue
+  src=$(git -c core.excludesFile=.sloplintignore check-ignore --no-index -v -- "$f")
+  case $src in .sloplintignore:*) continue ;; esac
   python3 skills/japanese-tech-writing/scripts/slop_lint.py "$f" || status=1
 done < <(git ls-files -z -- '*.md')
 exit $status
