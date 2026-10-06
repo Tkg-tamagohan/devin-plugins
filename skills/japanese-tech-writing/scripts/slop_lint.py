@@ -363,9 +363,11 @@ def lint_text(text: str) -> Dict[str, Any]:
         if not is_quote_or_table:
             sent_text = re.sub(r"`[^`]+`", "", stripped)
             sent_text = re.sub(r"「[^」]*」", "", sent_text)
-            # 脚注参照とリンクは文の終端ではないため除去(「文。[^脚注]」は一文のまま)
+            # 脚注参照は文の終端ではないため除去(「文。[^脚注]」は一文のまま)。
+            # リンクは表示文言だけを残して記法と宛先を消す。文言まで消すと
+            # 「文A。[文B。](url)」の二文目を検査から漏らす
             sent_text = re.sub(r"\[\^[^\]]*\]", "", sent_text)
-            sent_text = re.sub(r"\[[^\]]*\]\([^)]*\)", "", sent_text)
+            sent_text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", sent_text)
             sent_text = re.sub(r"（[^（）。！？]*）", "", sent_text)
             sent_text = re.sub(r"\*\*|\*|__", "", sent_text)
             if SENTENCE_SPLIT_PATTERN.search(sent_text):

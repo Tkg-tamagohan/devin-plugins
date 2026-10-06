@@ -147,7 +147,9 @@ def readme_table_names(readme: str, heading: str) -> set:
     names = set()
     in_section = False
     for line in readme.splitlines():
-        if re.match(r"^#{1,3}\s", line):
+        # 見出しは階層を問わず節を切り替える。#### などの下位節にある表を
+        # 収録一覧と取り違えないようにする
+        if re.match(r"^#+\s", line):
             in_section = line.strip().startswith(heading)
             continue
         if in_section and line.strip().startswith("|"):

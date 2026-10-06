@@ -200,10 +200,17 @@ class TestOneSentencePerLine(unittest.TestCase):
             rules_of("値は正しい。[^根拠]"),
         )
 
-    def test_line_08_リンクの後続は一文のままとする(self):
+    def test_line_08_リンク文言の二文目は検出する(self):
+        # リンク文言は表示される文章であり、内部の文は検査対象
+        self.assertIn(
+            "one_sentence_per_line",
+            rules_of("手順を説明します。[詳しく説明します。](https://example.com)"),
+        )
+
+    def test_line_09_文中のリンクは一文の一部とする(self):
         self.assertNotIn(
             "one_sentence_per_line",
-            rules_of("詳細は正しいです。[参考](https://example.com)"),
+            rules_of("この[手順](https://example.com)を実行します。"),
         )
 
 
