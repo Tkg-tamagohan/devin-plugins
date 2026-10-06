@@ -158,17 +158,7 @@ python3 <スキルのディレクトリ>/scripts/slop_lint.py <対象ファイ�
 devin-plugins リポジトリで複数の文書を一括検査するときは、リポジトリ直下の `.sloplintignore` が検査対象の除外を管理する。
 このファイルは gitignore 形式のパス一覧であり、検査対象から除くパスを変えたいときは 1 行 1 件でパスを足すか削る。
 `references/slop-catalog.md` は悪い表現を列挙する辞書であり、目的上の言及が規範抵触として検出されるため恒久除外としている。
-
-次のコマンドで、`.sloplintignore` の除外を適用した対象の一覧を得られる。
-
-```bash
-while IFS= read -r -d '' f; do
-  git -c core.excludesFile=.sloplintignore check-ignore --no-index -q "$f" || printf '%s\n' "$f"
-done < <(git ls-files -z -- '*.md')
-```
-
-一覧の各ファイルへリンターを適用すれば一括検査になる。
-途中で一つの検査が失敗しても残りを続けたうえで終了コードを非ゼロにしたいときは、失敗を集計する。
+次のコマンドは、除外を適用して全対象を検査し、途中の失敗を集計して終了コードを非ゼロにする。
 
 ```bash
 status=0
