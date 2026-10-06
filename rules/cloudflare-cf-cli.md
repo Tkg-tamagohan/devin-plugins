@@ -15,6 +15,7 @@ Cloudflare のリソースを CLI から操作するときは、REST API を cur
 
 ## 対象外
 
-- 稼働中の CI/CD パイプライン(`cloudflare/wrangler-action`、`wrangler pages deploy` など)。`cf` はオープンベータのため、動いているデプロイ経路は置き換えない。
+- 稼働中の CI/CD パイプライン(`cloudflare/wrangler-action`、`wrangler pages deploy` など)
+  - `cf` はオープンベータのため、動いているデプロイ経路は置き換えない。
 - Cloudflare のダッシュボードで完結する一度きりの作業。
 - Cloudflare に関係しない作業。
