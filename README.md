@@ -58,7 +58,7 @@ LICENSE                            # MIT License
 .sloplintignore                    # 文書リントの検査対象から外すパス一覧
 rules/<name>.md                    # トリガー付きルール(description に合う状況のセッションでのみ本文が読まれる)
 skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
-skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、構造チェック(scripts/check_plugin.py)
+skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、生成スクリプト(scripts/new_entry.py)、構造チェック(scripts/check_plugin.py)
 skills/japanese-tech-writing/scripts/    # スロップリンター(slop_lint.py)と回帰テスト
 skills/japanese-tech-writing/references/ # 悪い表現の語彙カタログ(slop-catalog.md)
 skills/repo-drift-audit/child-prompts.md # 監査で子セッションへ渡すプロンプトの定型
@@ -68,7 +68,8 @@ skills/repo-drift-audit/child-prompts.md # 監査で子セッションへ渡す�
 ルールやスキルをどこに置くか、どの粒度で分けるかの基準は `skills/plugin-authoring/guidelines.md` にまとめている。
 新しく追加するときは、スキル `shared-skills:plugin-authoring` の手順に従う。
 `rules/register-to-devin-plugins.md` により、セッション中に再利用可能なルールやスキルを作成した Devin はこのリポジトリへの追加 PR を自動で作る。
-PR では CI(`plugin-checks`) がスロップリンターの回帰テストと全 Markdown への文書リント(`.sloplintignore` 対象を除く `slop_lint.py --strict`、warn で失敗)、`check_plugin.py` による構造チェック(命名、frontmatter、「対象外」の有無、行数、README との同期、plugin.json の version 更新)を実行する。
+ルールやスキルの新規追加では `scripts/new_entry.py` が命名検査、テンプレートの複写、収録一覧への行追加、version バンプまでを担う(手順は `skills/plugin-authoring/SKILL.md`)。
+PR では CI(`plugin-checks`) がスロップリンターと生成スクリプトの回帰テスト、全 Markdown への文書リント(`.sloplintignore` 対象を除く `slop_lint.py --strict`、warn で失敗)、`check_plugin.py` による構造チェック(命名、frontmatter、「対象外」の有無、行数、README との同期、plugin.json の version 更新)を実行する。
 
 ## インストール / 更新
 

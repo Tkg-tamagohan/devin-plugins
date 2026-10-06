@@ -76,6 +76,7 @@ AGENTS.md の常時ルールは全スキルの前提なので、スキル本文�
 NG と OK の対比が有効な場面では、コードブロックで並べる(`windows-blueprint` の書き方)。
 
 テンプレートは `rule-template.md` と `skill-template.md` にある。
+テンプレートの複写と README 収録一覧への記帳は `scripts/new_entry.py` が行う。
 
 ## description の書き方
 
@@ -112,6 +113,7 @@ rule は求める振る舞いか対象を表す語(`ui-mock-first`、`library-li
 ## 変更の運用
 
 `.devin-plugin/plugin.json` の `version` は、追加と修正でパッチを、既存ファイルの移動、改名、削除を含む変更でマイナーを上げる。
+バンプは `scripts/new_entry.py` の scaffold または `bump` が差分から判定して付ける。
 利用側は再インデックスで新しい版を取り込むため、変更の種類がバージョンから読み取れる状態にしておく。
 
 追加のたびに、既存ファイルとの重複を `rg` で確認する。
