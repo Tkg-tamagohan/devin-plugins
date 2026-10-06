@@ -41,6 +41,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `dev-server-foreground-shell` | Devin VM 上での開発サーバーの起動と維持 |
 | `devin-review-triage` | Devin Review の指摘のトリアージと対応 |
 | `japanese-tech-writing` | 日本語技術文書の文章規範と機械検査リンター |
+| `output-format-escalation` | 説明や調査の成果物の出力形式の選択(制約付き文章、図、インタラクティブ HTML) |
 | `parallel-child-implementation` | 改善群の子セッションへの並列分割と依頼方法 |
 | `plugin-authoring` | このリポジトリへのルールやスキルの追加手順 |
 | `repo-drift-audit` | 文書やテスト資産とコードの乖離の網羅監査 |
