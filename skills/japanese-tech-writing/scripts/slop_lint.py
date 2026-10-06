@@ -367,12 +367,15 @@ def lint_text(text: str) -> Dict[str, Any]:
             # 文中の画像記法は代替テキストが表示文ではないため全体を除去する
             sent_text = re.sub(r"\[\^[^\]]*\]", "", sent_text)
             sent_text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", sent_text)
-            # リンクは文言に文末記号があるときだけ文言を残し、記法と宛先を消す。
-            # 文言まで消すと「文A。[文B。](url)」の二文目を漏らし、無条件に残すと
-            # 「文。[参考](url)」の末尾参照名を二文と誤判定する
+            # リンクは文言か直後の句読点が文の一部を示すときだけ文言を残し、
+            # 記法と宛先を消す。文言まで消すと「文A。[文B。](url)」の二文目を漏らし、
+            # 無条件に残すと「文。[参考](url)」の末尾参照名を二文と誤判定する。
+            # 「文A。[文B](url)。」のように句点がリンク外にある形も二文として捉える
             sent_text = re.sub(
-                r"\[([^\]]*)\]\([^)]*\)",
-                lambda m: m.group(1) if re.search(r"[。！？]", m.group(1)) else "",
+                r"\[([^\]]*)\]\([^)]*\)([。！？]?)",
+                lambda m: m.group(1) + m.group(2)
+                if m.group(2) or re.search(r"[。！？]", m.group(1))
+                else "",
                 sent_text,
             )
             sent_text = re.sub(r"（[^（）。！？]*）", "", sent_text)

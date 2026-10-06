@@ -227,6 +227,13 @@ class TestOneSentencePerLine(unittest.TestCase):
             rules_of("これは![画面。](image.png)を示します。"),
         )
 
+    def test_line_12_リンク外の句点で終わる二文目は検出する(self):
+        # リンク文言に続けて句点を置く書式の二文目も検査対象
+        self.assertIn(
+            "one_sentence_per_line",
+            rules_of("概要です。[詳細を確認します](https://example.com)。"),
+        )
+
 
 class TestHeadingDecoration(unittest.TestCase):
     """見出しの罫線(U+2500)の検出。整形規範「見出しに区切り線で二要素を詰め込まない」に対応"""
