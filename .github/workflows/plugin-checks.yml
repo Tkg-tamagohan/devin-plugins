@@ -30,10 +30,10 @@ jobs:
       - name: 文書リント（全 Markdown、warn で失敗）
         run: |
           status=0
+          excluded=$(mktemp); trap 'rm -f "$excluded"' EXIT
+          git ls-files -z -c -i -X .sloplintignore -- '*.md' > "$excluded"
           while IFS= read -r -d '' f; do
-            if src=$(git -c core.excludesFile=.sloplintignore check-ignore --no-index -v -- "$f"); then
-              case $src in .sloplintignore:*) continue ;; esac
-            fi
+            grep -qzxF -- "$f" "$excluded" && continue
             python3 skills/japanese-tech-writing/scripts/slop_lint.py --strict "$f" || status=1
           done < <(git ls-files -z -- '*.md')
           exit $status
