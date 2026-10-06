@@ -26,6 +26,10 @@ jobs:
           python3 test_slop_lint.py
           python3 test_catalog_consistency.py
 
+      - name: 生成スクリプトの回帰テスト
+        working-directory: skills/plugin-authoring/scripts
+        run: python3 test_new_entry.py
+
       - name: プラグイン構造チェック
         run: python3 skills/plugin-authoring/scripts/check_plugin.py
 
