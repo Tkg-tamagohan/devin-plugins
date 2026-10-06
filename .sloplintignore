@@ -1,5 +1,4 @@
 # 文書リントの検査対象から除くパスを 1 行 1 件で列挙する。
-# git ls-files の :(exclude) パススペックとして解釈され、glob パターンも使える。
-# `#` で始まる行と空行は無視される。
+# git check-ignore から gitignore 形式で解釈され、glob パターンや `!` による再含めも使える。
 # 悪い表現を列挙する辞書は、言及自体が規範抵触として検出されるため恒久除外とする。
 skills/japanese-tech-writing/references/slop-catalog.md

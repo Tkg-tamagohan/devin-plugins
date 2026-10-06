@@ -162,16 +162,21 @@ devin-plugins リポジトリで複数の文書を一括検査するときは、
 次のコマンドで、`.sloplintignore` の除外を適用した対象の一覧を得られる。
 
 ```bash
-git ls-files -- '*.md' $(grep -vE '^\s*(#|$)' .sloplintignore | sed 's/^/:(exclude)/')
+while IFS= read -r -d '' f; do
+  git -c core.excludesFile=.sloplintignore check-ignore --no-index -q "$f" || printf '%s\n' "$f"
+done < <(git ls-files -z -- '*.md')
 ```
 
 一覧の各ファイルへリンターを適用すれば一括検査になる。
+途中で一つの検査が失敗しても残りを続けたうえで終了コードを非ゼロにしたいときは、失敗を集計する。
 
 ```bash
-git ls-files -- '*.md' $(grep -vE '^\s*(#|$)' .sloplintignore | sed 's/^/:(exclude)/') \
-  | while IFS= read -r f; do
-      python3 skills/japanese-tech-writing/scripts/slop_lint.py "$f"
-    done
+status=0
+while IFS= read -r -d '' f; do
+  git -c core.excludesFile=.sloplintignore check-ignore --no-index -q "$f" && continue
+  python3 skills/japanese-tech-writing/scripts/slop_lint.py "$f" || status=1
+done < <(git ls-files -z -- '*.md')
+exit $status
 ```
 
 - 検出結果は機械的な見直し候補である。本規範で正当な記述（定義語の太字、定義列挙の箇条書き、「」による言及、必要な推量表現、文脈上正当な専門用語など）に対する指摘は、本規範を優先して保持する。
