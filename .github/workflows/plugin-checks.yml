@@ -22,7 +22,9 @@ jobs:
 
       - name: スロップリンターの回帰テスト
         working-directory: skills/japanese-tech-writing/scripts
-        run: python3 test_slop_lint.py
+        run: |
+          python3 test_slop_lint.py
+          python3 test_catalog_consistency.py
 
       - name: プラグイン構造チェック
         run: python3 skills/plugin-authoring/scripts/check_plugin.py
