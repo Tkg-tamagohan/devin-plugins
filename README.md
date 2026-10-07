@@ -56,6 +56,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 AGENTS.md                          # 全セッションに常時適用される共通ルール
 LICENSE                            # MIT License
 .sloplintignore                    # 文書リントの検査対象から外すパス一覧
+docs/                              # 計画書と決定記録(セッションをまたぐ作業の引き継ぎ文書)
 rules/<name>.md                    # トリガー付きルール(description に合う状況のセッションでのみ本文が読まれる)
 skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
 skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、生成スクリプト(scripts/new_entry.py)、構造チェック(scripts/check_plugin.py)
