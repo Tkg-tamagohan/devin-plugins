@@ -443,8 +443,10 @@ def lint_text(text: str) -> Dict[str, Any]:
                 masked_text = re.sub(r"`[^`]+`", "　", stripped)
             else:
                 masked_text = scan_text
-            # 「」の言及は区切り(全角空白)に置き換えて誤検出を防ぐ
+            # 「」の言及は区切り(全角空白)に置き換えて誤検出を防ぐ。
+            # 太字や強調の記号も除く(「**作成**・**推敲**」を遮断しないため)
             masked_text = re.sub(r"「[^」]*」", "　", masked_text)
+            masked_text = re.sub(r"\*\*|\*|__", "", masked_text)
             for m in NAKAGURO_ENUM_PATTERN.finditer(masked_text):
                 segments = re.split(r"[・･]", m.group(0))
                 if all(PROPER_NOUN_SEGMENT_PATTERN.fullmatch(s) for s in segments):

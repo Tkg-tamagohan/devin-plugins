@@ -309,6 +309,19 @@ class TestNakaguroParallel(unittest.TestCase):
             rules_of("アーサー・C・クラークの例を挙げる。"),
         )
 
+    def test_naka_09_太字の語を含む並列も検出する(self):
+        # 装飾記号の除去を忘れると中黒の前後が * になり並列と認識できない回帰
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("**作成**・**推敲**を進める。"),
+        )
+
+    def test_naka_10_片側だけ太字の並列も検出する(self):
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("**作成**・推敲を進める。"),
+        )
+
 
 class TestOneSentencePerLine(unittest.TestCase):
     """一行に複数の文がある形の検出。整形規範「一文ごとに改行する」に対応"""
