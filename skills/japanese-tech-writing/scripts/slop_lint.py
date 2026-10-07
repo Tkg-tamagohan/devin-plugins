@@ -19,12 +19,13 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 上流の変更で取り込んだ調整点:
 - 比喩動詞の追加(Xが壊れる、踏み込む、引き返す、添える、収斂)と
   「Xが壊れる」「静かに壊れる」の同一動詞への二重反応の回避
-- 絵文字検査はインラインコード、URL、リンク宛先、HTML を除いた
-  可視テキストで行う(構造解析への移行までは正規表現による近似)
 - 同一文末の連続検出は段落(隣接する地の文)の内側に限定する
 - 「A ではなく B」構文は上流の正確な字句走査で判定する
 - 太字の印(**)が表示されない書き方の検査を markdown_bold.py から
   呼び出す(上流の判定機械を共通モジュールへ切り出したもの)
+- 行ごとの正規表現走査を markdown_visibility.py の構造解析へ移行。
+  コード・URL・HTML・参照定義などの不透明領域は可視テキストで
+  空白化し、引用・表・HTML ブロックはブロック種別で除外する
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -38,17 +39,32 @@ import json
 from typing import List, Dict, Any, Tuple, Optional
 
 try:
-    from markdown_bold import bold_problems
-except ModuleNotFoundError:
+    from markdown_bold import bold_problems, _bold_problems_with_analysis
+    from markdown_visibility import (
+        analyze_markdown, line_visible_text, range_overlaps_protected,
+    )
+except ModuleNotFoundError as error:
     # spec_from_file_location などで読み込まれた場合でも同ディレクトリの
-    # markdown_bold.py を解決できるようにする
+    # モジュールを解決できるようにする
+    if error.name not in ("markdown_bold", "markdown_visibility"):
+        raise
     import importlib.util
     from pathlib import Path
-    _bold_spec = importlib.util.spec_from_file_location(
-        "_yomiyasu_markdown_bold", Path(__file__).with_name("markdown_bold.py"))
-    _bold_module = importlib.util.module_from_spec(_bold_spec)
-    _bold_spec.loader.exec_module(_bold_module)
+
+    def _load_sibling(name):
+        spec = importlib.util.spec_from_file_location(
+            "_yomiyasu_" + name, Path(__file__).with_name(name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    _bold_module = _load_sibling("markdown_bold")
     bold_problems = _bold_module.bold_problems
+    _bold_problems_with_analysis = _bold_module._bold_problems_with_analysis
+    _visibility_module = _load_sibling("markdown_visibility")
+    analyze_markdown = _visibility_module.analyze_markdown
+    line_visible_text = _visibility_module.line_visible_text
+    range_overlaps_protected = _visibility_module.range_overlaps_protected
 
 # 絵文字正規表現パターン(CJK 統合漢字拡張などのサロゲートペア漢字を除外した厳密な絵文字範囲)
 EMOJI_PATTERN = re.compile(
@@ -178,28 +194,6 @@ ABSTRACT_NOUN_PATTERN = re.compile(
 CHAIN_MASK_PATTERN = re.compile(r"一つの|ものの|ための|ので")
 
 
-CODE_FENCE_PATTERN = re.compile(r"^(`{3,}|~{3,})")
-# 終了フェンスは info 文字列を持てない(記号と末尾の空白のみ)
-CLOSING_FENCE_PATTERN = re.compile(r"^(`{3,}|~{3,})\s*$")
-
-
-def update_code_fence(stripped: str, open_fence: Optional[str]) -> Optional[str]:
-    """コードフェンスの状態を更新して返す
-
-    Markdown では開いたフェンスと同じ種類の記号で、同じ長さ以上かつ
-    info 文字列のない行のみがブロックを閉じる。別種のフェンス行や
-    言語指定つきの行はブロック内の本文として扱う。
-    open_fence は開いているフェンス記号(例: '```')、開いていなければ None。
-    """
-    if open_fence is None:
-        m = CODE_FENCE_PATTERN.match(stripped)
-        return m.group(1) if m else None
-    m = CLOSING_FENCE_PATTERN.match(stripped)
-    if m and m.group(1)[0] == open_fence[0] and len(m.group(1)) >= len(open_fence):
-        return None
-    return open_fence
-
-
 def get_frontmatter_line_count(lines: List[str]) -> int:
     """YAML フロントマター(先頭の --- から次の --- まで)の行数を返す"""
     if not lines or lines[0].strip() != "---":
@@ -210,63 +204,57 @@ def get_frontmatter_line_count(lines: List[str]) -> int:
     return 0
 
 
-def extract_plain_sentences(text: str) -> List[Tuple[int, Optional[str]]]:
-    """コードブロックや引用、箇条書きを除去し、地の文の段落文(行番号つき)を抽出する
+def _plain_sentence_records(analysis):
+    """地の文の段落文を (行番号, 可視テキスト, 原文断片, 段落グループ) で返す
 
-    見出し行は (行番号, None) の境界マーカーとして残し、文末連続の
-    判定が節をまたがないようにする。
+    段落ブロックだけを対象とし、引用・箇条書き・表・見出し・コード等は
+    ブロックの種別で除く。画像だけの行は段落の区切りとして扱い、
+    段落グループを進める。
     """
-    lines = text.split("\n")
-    sentences = []
-    open_fence = None
-    fm_lines = get_frontmatter_line_count(lines)
-
-    for idx, line in enumerate(lines, 1):
-        if idx <= fm_lines:
+    records = []
+    for block_id, block in enumerate(analysis["blocks"]):
+        if block["kind"] != "paragraph":
             continue
-        stripped = line.strip()
-        prev_fence = open_fence
-        open_fence = update_code_fence(stripped, open_fence)
-        if prev_fence is not None or open_fence is not None:
-            continue
-        # 見出しは節の境界として記録する
-        if stripped.startswith("#"):
-            sentences.append((idx, None))
-            continue
-        # 空行、表行、画像記法、HTML タグ、引用行、箇条書き行、インデントされたリスト継続行は地の文から除外
-        if (
-            not stripped
-            or stripped.startswith("|")
-            or stripped.startswith("![")
-            or stripped.startswith("[![")
-            or stripped.startswith("<")
-            or stripped.startswith(">")
-            or re.match(r"^[-*+]\s|^\d+\.\s", stripped)
-            or line.startswith("  ")
-            or line.startswith("\t")
-        ):
-            continue
-
-        # 文の区切り(。！？または行末)
-        raw_sents = re.split(r"(?<=[。！？])", stripped)
-        for s in raw_sents:
-            s_clean = s.strip()
-            if s_clean and len(s_clean) > 3:
-                sentences.append((idx, s_clean))
-
-    return sentences
+        section = 0
+        for row in block["lines"]:
+            visible = _prose_visible_text(analysis, row["line"])
+            if _image_only_row(analysis, row, visible):
+                section += 1
+                continue
+            if not visible.strip():
+                continue
+            start = 0
+            ends = [match.start() for match in re.finditer(r"(?<=[。！？])", visible)]
+            if not ends or ends[-1] != len(visible):
+                ends.append(len(visible))
+            for end in ends:
+                clean = visible[start:end].strip()
+                if clean and len(clean) > 3:
+                    records.append((row["line"], clean, row["raw"][start:end].strip(), (block_id, section)))
+                start = end
+    return records
 
 
-def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -> List[Dict[str, Any]]:
-    """3 文以上連続する同一語尾の検知。見出しの境界マーカーで連続数を切り離す"""
+def extract_plain_sentences(text: str) -> List[Tuple[int, str]]:
+    """コードブロックや引用、箇条書きを除き、元の行番号つきで地の文を抽出する。"""
+    records = _plain_sentence_records(analyze_markdown(text))
+    return [(line, visible) for line, visible, _, _ in records]
+
+
+def _sentence_end_findings(sentences, source_sentences=None, paragraph_groups=None):
+    """3 文以上連続する同一語尾の検知。段落グループまたは行の隣接で切り離す"""
     findings = []
     end_types = []
 
     for line_no, s in sentences:
-        if s is None:
-            end_types.append((line_no, s, "boundary"))
-            continue
-        clean = re.sub(r"[。！？\s]+$", "", s)
+        end = len(s)
+        floor = max(0, end - 64)
+        while end > floor and (s[end - 1] in "。！？" or s[end - 1].isspace()):
+            end -= 1
+        if end == floor and end and (s[end - 1] in "。！？" or s[end - 1].isspace()):
+            clean = re.sub(r"(?<![。！？\s])[。！？\s]+$", "", s)
+        else:
+            clean = s[:end]
         end_type = "その他"
         if clean.endswith("です"):
             end_type = "です"
@@ -290,10 +278,11 @@ def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -
         prev_line, prev_s, prev_type = end_types[i - 1]
         curr_line, curr_s, curr_type = end_types[i]
 
-        # 隣接する地の文だけを段落内として数え、空行や除外した
-        # ブロック(見出し、箇条書き、引用、表など)を挟めば数え直す
-        same_paragraph = curr_line <= prev_line + 1
-        if same_paragraph and curr_type not in ("その他", "boundary") and curr_type == prev_type:
+        # 同じ段落だけを数え、空行や除外したブロック(見出し、箇条書き、
+        # 引用、表など)を挟めば数え直す
+        same_paragraph = (paragraph_groups[i] == paragraph_groups[i - 1]
+                          if paragraph_groups is not None else curr_line <= prev_line + 1)
+        if same_paragraph and curr_type != "その他" and curr_type == prev_type:
             count += 1
             if count == 3:
                 findings.append({
@@ -301,7 +290,7 @@ def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -
                     "line": curr_line,
                     "severity": "warn",
                     "message": f"同一文末「{curr_type}」が3回以上連続しています。文末のリズムを調整してください。",
-                    "snippet": curr_s
+                    "snippet": source_sentences[i][1] if source_sentences is not None else curr_s
                 })
         else:
             count = 1
@@ -309,69 +298,98 @@ def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -
     return findings
 
 
+def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -> List[Dict[str, Any]]:
+    """互換 API。段落グループ情報のない呼び出しでは行の隣接で判定する"""
+    return _sentence_end_findings(sentences)
+
+
+_METRIC_OPAQUE_KINDS = frozenset((
+    "code", "frontmatter", "html_block", "reference_definition", "inline_code",
+    "html_token", "autolink", "link_destination", "image", "bare_url"
+))
+_PROSE_SCAN_KINDS = _METRIC_OPAQUE_KINDS | frozenset(("container_prefix",))
+
+
+def _prose_visible_text(analysis, line_no):
+    """語彙・構文検査と文末抽出が共有する、不透明領域を空白化した可視テキスト"""
+    cache = analysis.setdefault("_prose_line_cache", {})
+    if line_no not in cache:
+        cache[line_no] = line_visible_text(analysis, line_no, _PROSE_SCAN_KINDS)
+    return cache[line_no]
+
+
+def _image_only_row(analysis, row, visible):
+    """実画像だけの行は区切りとして扱うが、画像の後の本文は読み飛ばさない"""
+    if not visible.strip():
+        return range_overlaps_protected(analysis, row["start"], row["start"] + len(row["raw"]),
+                                        frozenset(("image",)))
+    raw = row["raw"]
+    if not raw.strip().startswith("[!["):
+        return False
+    if "_image_link_start_indexes" not in analysis:
+        images, destinations = {}, {}
+        for left, right, kind in analysis["protected_spans"]:
+            if kind == "image":
+                images[left] = right
+            elif kind == "link_destination":
+                destinations[left] = right
+        analysis["_image_link_start_indexes"] = (images, destinations)
+    images, destinations = analysis["_image_link_start_indexes"]
+    start = row["start"] + len(raw) - len(raw.lstrip())
+    end = row["start"] + len(raw.rstrip())
+    image_end = images.get(start + 1)
+    return (image_end is not None
+            and analysis["text"][image_end:image_end + 2] == "]("
+            and destinations.get(image_end + 1) == end)
+
+
+def _metrics_from_analysis(analysis):
+    """語彙・文末検査と同じ不透明領域の境界で構造メトリクスを算出する"""
+    plain_rows = []
+    for row in analysis["lines"]:
+        stripped = row["raw"].strip()
+        if row["kind"] in ("code", "frontmatter", "html_block", "reference_definition"):
+            continue
+        if row["quote_depth"] or row["kind"] == "table":
+            continue
+        visible = line_visible_text(analysis, row["line"], _METRIC_OPAQUE_KINDS)
+        if _image_only_row(analysis, row, visible):
+            continue
+        if stripped:
+            plain_rows.append((row, visible))
+    total_lines = len(plain_rows)
+    list_lines = 0
+    for row, _ in plain_rows:
+        if re.match(r"^\s*([-*+]|\d+\.)\s+", row["raw"]):
+            # 外部参照リンク(- [タイトル](http...))は並列データのため思考リストから除外
+            if not re.search(r"[-*+]\s+\[.*?\]\(https?://", row["raw"]):
+                list_lines += 1
+    plain_content = "\n".join(visible for _, visible in plain_rows)
+    bold_count = len(re.findall(r"\*\*[^*]+\*\*", plain_content))
+    char_count = len(re.sub(r"\s+", "", plain_content))
+    bold_per_1000 = bold_count / char_count * 1000 if char_count > 0 else 0
+    list_ratio = list_lines / total_lines if total_lines > 0 else 0
+    return {"char_count": char_count, "total_lines": total_lines, "list_lines": list_lines,
+            "list_ratio": round(list_ratio, 3), "bold_count": bold_count,
+            "bold_per_1000": round(bold_per_1000, 2)}
+
+
 def analyze_markdown_metrics(text: str) -> Dict[str, Any]:
     """太字頻度、箇条書き比率などの構造メトリクスを算出(引用文やコードブロックは除外)"""
-    lines = text.split("\n")
-    plain_lines = []
-    open_fence = None
-    fm_lines = get_frontmatter_line_count(lines)
-    for idx, l in enumerate(lines, 1):
-        if idx <= fm_lines:
-            continue
-        stripped = l.strip()
-        prev_fence = open_fence
-        open_fence = update_code_fence(stripped, open_fence)
-        if prev_fence is not None or open_fence is not None:
-            continue
-        if stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
-            continue
-        plain_lines.append(l)
-
-    total_lines = len([l for l in plain_lines if l.strip()])
-    list_lines = 0
-    for l in plain_lines:
-        if re.match(r"^\s*([-*+]|\d+\.)\s+", l):
-            # 外部参照リンク(- [タイトル](http...))は並列データのため思考リストから除外
-            if not re.search(r"[-*+]\s+\[.*?\]\(https?://", l):
-                list_lines += 1
-
-    plain_content = "\n".join(plain_lines)
-    bold_matches = re.findall(r"\*\*[^*]+\*\*", plain_content)
-    bold_count = len(bold_matches)
-    char_count = len(re.sub(r"\s+", "", plain_content))
-
-    bold_per_1000 = (bold_count / char_count * 1000) if char_count > 0 else 0
-    list_ratio = (list_lines / total_lines) if total_lines > 0 else 0
-
-    return {
-        "char_count": char_count,
-        "total_lines": total_lines,
-        "list_lines": list_lines,
-        "list_ratio": round(list_ratio, 3),
-        "bold_count": bold_count,
-        "bold_per_1000": round(bold_per_1000, 2),
-    }
-
-
-def _emoji_visible_text(line: str) -> str:
-    """絵文字検査用に、装飾として機能しない領域を除いた可視テキストを返す
-
-    インラインコード、画像記法、リンク宛先、autolink、HTML タグ、
-    裸の URL の内部にある絵文字は装飾ではないため検査対象から外す。
-    """
-    text = re.sub(r"`[^`]*`", "　", line)
-    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "　", text)
-    text = re.sub(r"\]\([^)]*\)", "]", text)
-    text = re.sub(r"<[^>\s]*>", "　", text)
-    text = re.sub(r"https?://[^\s<>()]+|www\.[^\s<>()]+", "　", text)
-    return text
+    return _metrics_from_analysis(analyze_markdown(text))
 
 
 def lint_text(text: str) -> Dict[str, Any]:
     """文章全体を総合検査する"""
     findings = []
-    metrics = analyze_markdown_metrics(text)
-    sentences = extract_plain_sentences(text)
+    analysis = analyze_markdown(text)
+    metrics = _metrics_from_analysis(analysis)
+    sentence_records = _plain_sentence_records(analysis)
+    sentences = [(line, visible) for line, visible, _, _ in sentence_records]
+    source_sentences = [(line, source) for line, _, source, _ in sentence_records]
+    paragraph_groups = [block_id for _, _, _, block_id in sentence_records]
+    metaphor_patterns = [(re.compile(pattern), desc) for pattern, desc in METAPHOR_VERB_PATTERNS]
+    filler_patterns = [(re.compile(pattern), desc) for pattern, desc in FILLER_PATTERNS]
 
     # 1. メトリクス異常の検査(地の文が十分ある場合に適用)
     #    本スキルが許容する記法(定義語の太字、定義列挙の箇条書き)でも
@@ -396,10 +414,10 @@ def lint_text(text: str) -> Dict[str, Any]:
             })
 
     # 2. 文末重複検査
-    findings.extend(check_sentence_end_repetitions(sentences))
+    findings.extend(_sentence_end_findings(sentences, source_sentences, paragraph_groups))
 
     # 2.5 太字が表示されるか(GitHub などで ** がそのまま出ることがある箇所)
-    for p in bold_problems(text):
+    for p in _bold_problems_with_analysis(text, analysis):
         findings.append({
             "rule": "bold_not_rendered",
             "line": p["line"],
@@ -409,54 +427,59 @@ def lint_text(text: str) -> Dict[str, Any]:
         })
 
     # 3. 語彙・構文パターン検査
-    lines = text.split("\n")
-    open_fence = None
-    fm_lines = get_frontmatter_line_count(lines)
-    for line_no, line in enumerate(lines, 1):
+    for row in analysis["lines"]:
+        line_no, line = row["line"], row["raw"]
+        kind = row["kind"]
+        if kind == "code":
+            continue
         stripped = line.strip()
-        prev_fence = open_fence
-        open_fence = update_code_fence(stripped, open_fence)
-        if prev_fence is not None or open_fence is not None:
+        scan_text = _prose_visible_text(analysis, line_no).strip()
+
+        # 中黒による並列(本スキルの整形規範。固有名詞の内部は例外)。
+        # 記号だけで判定できる検査はフロントマターを含む全行が対象だが、
+        # HTML ブロック・参照定義・コードや URL の不透明領域は除く
+        if kind not in ("html_block", "reference_definition"):
+            if kind == "frontmatter":
+                masked_text = re.sub(r"`[^`]+`", "　", stripped)
+            else:
+                masked_text = scan_text
+            # 「」の言及は区切り(全角空白)に置き換えて誤検出を防ぐ
+            masked_text = re.sub(r"「[^」]*」", "　", masked_text)
+            for m in NAKAGURO_ENUM_PATTERN.finditer(masked_text):
+                segments = re.split(r"[・･]", m.group(0))
+                if all(PROPER_NOUN_SEGMENT_PATTERN.fullmatch(s) for s in segments):
+                    continue
+                findings.append({
+                    "rule": "nakaguro_parallel",
+                    "line": line_no,
+                    "severity": "warn",
+                    "message": "中黒(・)の並列が検出されました。読点や「や」「と」などに書き直してください。単一の固有名詞の内部は対象外です。",
+                    "snippet": line.strip()
+                })
+                break
+
+        if kind in ("frontmatter", "html_block", "reference_definition"):
+            continue
+        if not scan_text:
             continue
 
-        # 記号だけで判定できる検査はフロントマター・見出し・表行を含む全行が対象。
-        # 「」の言及とインラインコードは区切り(全角空白)に置き換えて誤検出を防ぐ。
-        masked_text = re.sub(r"`[^`]+`", "　", stripped)
-        masked_text = re.sub(r"「[^」]*」", "　", masked_text)
-        masked_text = re.sub(r"\*\*|\*|__", "", masked_text)
+        # 「」で囲まれた言及は禁止表現の例示であることが多い。use と mention を
+        # 区別するため、語彙・構文検査は言及を除いたテキストで行う。
+        # 中黒は各検査パターンを跨げない区切りになる。「X」ではなく「Y」では
+        # ではなく が残るので、実際の対比は引き続き検査できる
+        mention_free = re.sub(r"「[^」]*」", "・", scan_text)
 
-        # 中黒による並列(本スキルの整形規範。固有名詞の内部は例外)
-        for m in NAKAGURO_ENUM_PATTERN.finditer(masked_text):
-            segments = re.split(r"[・･]", m.group(0))
-            if all(PROPER_NOUN_SEGMENT_PATTERN.fullmatch(s) for s in segments):
-                continue
-            findings.append({
-                "rule": "nakaguro_parallel",
-                "line": line_no,
-                "severity": "warn",
-                "message": "中黒(・)の並列が検出されました。読点や「や」「と」などに書き直してください。単一の固有名詞の内部は対象外です。",
-                "snippet": line.strip()
-            })
-            break
-
-        if line_no <= fm_lines:
-            continue
-
-        # 一文一行(本スキルの整形規範)。引用・表・画像・HTML 行は対象外
-        is_quote_or_table = stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<")
-        if not is_quote_or_table:
-            sent_text = re.sub(r"`[^`]+`", "", stripped)
-            sent_text = re.sub(r"「[^」]*」", "", sent_text)
-            # 脚注参照は文の終端ではないため除去(「文。[^脚注]」は一文のまま)。
-            # 文中の画像記法は代替テキストが表示文ではないため全体を除去する
+        # 一文一行(本スキルの整形規範)。引用・表は対象外
+        if not row["quote_depth"] and kind not in ("quote", "table"):
+            sent_text = re.sub(r"「[^」]*」", "", _prose_visible_text(analysis, line_no))
             sent_text = re.sub(r"\[\^[^\]]*\]", "", sent_text)
-            sent_text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", sent_text)
             # リンクは文言か直後の句読点が文の一部を示すときだけ文言を残し、
-            # 記法と宛先を消す。文言まで消すと「文A。[文B。](url)」の二文目を漏らし、
-            # 無条件に残すと「文。[参考](url)」の末尾参照名を二文と誤判定する。
+            # 記法と宛先(可視化で空白化済み)を消す。文言まで消すと
+            # 「文A。[文B。](url)」の二文目を漏らし、無条件に残すと
+            # 「文。[参考](url)」の末尾参照名を二文と誤判定する。
             # 「文A。[文B](url)。」のように句点がリンク外にある形も二文として捉える
             sent_text = re.sub(
-                r"\[([^\]]*)\]\([^)]*\)([。！？]?)",
+                r"\[([^\]]*)\][ \t]+([。！？]?)",
                 lambda m: m.group(1) + m.group(2)
                 if m.group(2) or re.search(r"[。！？]", m.group(1))
                 else "",
@@ -473,9 +496,9 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "snippet": line.strip()
                 })
 
-        # 絵文字検知(見出し・本文問わず禁止)。コード片や URL の内部に
-        # ある絵文字は装飾ではないため、検査前に可視テキストへ置き換える
-        emoji_matches = EMOJI_PATTERN.findall(_emoji_visible_text(line))
+        # 絵文字検知(見出し・本文問わず禁止)。コード片・URL・HTML の内部に
+        # ある絵文字は装飾ではないため、可視テキストでは空白化済み
+        emoji_matches = EMOJI_PATTERN.findall(scan_text)
         if emoji_matches:
             findings.append({
                 "rule": "emoji_prohibited",
@@ -485,20 +508,13 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "snippet": line.strip()
             })
 
-        # インラインコード(`...`)を除去したテキストを作成
-        scan_text = re.sub(r"`[^`]+`", "", stripped)
-        # 「」で囲まれた言及は禁止表現の例示であることが多い。use と mention を
-        # 区別するため、語彙・構文検査は言及を除いたテキストで行う。
-        # 空文字で消すと前後が接合して誤検出するため中黒で置き換える。
-        # 中黒は各検査パターンを跨げない区切りになる。「X」ではなく「Y」では
-        # ではなく が残るので、実際の対比は引き続き検査できる
-        mention_free = re.sub(r"「[^」]*」", "・", scan_text)
-        # 太字や強調などの装飾記号(**、*、__)を除去した正規化テキストで語彙・比喩を検査
-        plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
+        # 引用ブロックや表行はアンチパターン例示等の可能性が高いため語彙スキャンをスキップ
+        if row["quote_depth"] or kind in ("quote", "table"):
+            continue
 
         # 見出し行は補足カッコとダッシュのみ検査し、本文の語彙・構文検査はスキップ
-        if stripped.startswith("#"):
-            if re.search(r"（(素の出力|いわゆる|概要|詳細|感謝と設計への反映)）", stripped):
+        if kind == "heading":
+            if re.search(r"（(素の出力|いわゆる|概要|詳細|感謝と設計への反映)）", scan_text):
                 findings.append({
                     "rule": "redundant_bracket",
                     "line": line_no,
@@ -516,15 +532,6 @@ def lint_text(text: str) -> Dict[str, Any]:
                 })
             continue
 
-        # 引用ブロック(>)やテーブル行(|)、画像、HTML タグはアンチパターン例示等の可能性が高いため語彙スキャンをスキップ
-        if stripped.startswith(">") or stripped.startswith("|") or stripped.startswith("![") or stripped.startswith("[![") or stripped.startswith("<"):
-            continue
-
-        # 箇条書きの記号部分を除き、行頭のフィラーなども検査できるようにする。
-        # plain_text は箇条書き除去後の mention_free から作る(* が強調記号として
-        # 先に除去されると行頭に空白が残り、行頭パターンに一致しなくなる)
-        scan_text = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", scan_text)
-        mention_free = re.sub(r"^[-*+]\s+|^\d+\.\s+", "", mention_free)
         plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
 
         # ダッシュ記号検知(本スキルの整形規範)
@@ -537,15 +544,20 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "snippet": line.strip()
             })
 
-        # 文末コロン(全角「:」または半角「:」)検知
-        if re.search(r"[：:]$", scan_text) and not scan_text.startswith("http"):
-            findings.append({
-                "rule": "trailing_colon",
-                "line": line_no,
-                "severity": "warn",
-                "message": "文末にコロンが使われています。平文の句点(。)で終えるか前置きを省いてください。箇条書き中の「**用語**:説明」形式は対象外です。",
-                "snippet": line.strip()
-            })
+        # 文末コロン(全角「:」または半角「:」)検知。
+        # 行末のコロンがコード・URL 等の不透明領域の内側にある場合は除く
+        if re.search(r"[：:]$", stripped):
+            uri_prefix_text = line_visible_text(analysis, line_no, frozenset(("inline_code",))).strip()
+            last = len(line.rstrip()) - 1
+            if (not uri_prefix_text.startswith("http")
+                    and not range_overlaps_protected(analysis, row["start"] + last, row["start"] + last + 1, _METRIC_OPAQUE_KINDS)):
+                findings.append({
+                    "rule": "trailing_colon",
+                    "line": line_no,
+                    "severity": "warn",
+                    "message": "文末にコロンが使われています。平文の句点(。)で終えるか前置きを省いてください。箇条書き中の「**用語**:説明」形式は対象外です。",
+                    "snippet": line.strip()
+                })
 
         # スロップ語彙
         for word in SLOP_WORDS:
@@ -560,14 +572,14 @@ def lint_text(text: str) -> Dict[str, Any]:
 
         # 比喩動詞パターン
         kowareru_span = None
-        for pattern, desc in METAPHOR_VERB_PATTERNS:
+        for pattern, desc in metaphor_patterns:
             # 「収斂」の先行確認。文境界またぎ防止ガード [^。！？!?]*? は
             # マッチしない行で全位置からの再試行を伴うため、対象語がなければ省く
-            if pattern == r"(議論|意見|結論|方向性|価格|話題|検討)が[^。！？!?]*?収斂" and "収斂" not in plain_text:
+            if pattern.pattern == r"(議論|意見|結論|方向性|価格|話題|検討)が[^。！？!?]*?収斂" and "収斂" not in plain_text:
                 continue
             if desc == "英語直訳「静かに壊れる (silently fail)」" and kowareru_span:
                 # 「Xが壊れる」と「静かに壊れる」が同一動詞に二重反応することを防止
-                for m in re.finditer(pattern, plain_text):
+                for m in pattern.finditer(plain_text):
                     span = (m.start(), m.end())
                     if kowareru_span[0] <= span[0] and span[1] <= kowareru_span[1]:
                         continue
@@ -581,7 +593,7 @@ def lint_text(text: str) -> Dict[str, Any]:
                     break
                 continue
 
-            m = re.search(pattern, plain_text)
+            m = pattern.search(plain_text)
             if m:
                 if desc == "比喩動詞「壊れる」":
                     kowareru_span = (m.start(), m.end())
@@ -594,8 +606,8 @@ def lint_text(text: str) -> Dict[str, Any]:
                 })
 
         # フィラーパターン
-        for pattern, desc in FILLER_PATTERNS:
-            if re.search(pattern, plain_text):
+        for pattern, desc in filler_patterns:
+            if pattern.search(plain_text):
                 findings.append({
                     "rule": "meta_filler",
                     "line": line_no,
