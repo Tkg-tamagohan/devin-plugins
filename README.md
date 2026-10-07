@@ -37,6 +37,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | スキル | 内容 |
 | --- | --- |
 | `cf-cli` | Cloudflare 公式 CLI `cf` の実行方法 |
+| `chrome-extension-real-input-testing` | MV3 Chrome 拡張の実 UI 検証 — 拡張 reload 後のタブ再読込・ボットウォール下の DOM 検証・isolated world 制約 |
 | `cloudflare-access-setup` | Cloudflare Access でサイトを保護する設定手順 |
 | `dev-server-foreground-shell` | Devin VM 上での開発サーバーの起動と維持 |
 | `devin-review-triage` | Devin Review の指摘のトリアージと対応 |
