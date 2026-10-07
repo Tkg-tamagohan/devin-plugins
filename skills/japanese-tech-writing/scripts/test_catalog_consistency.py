@@ -59,11 +59,6 @@ DETECTION_PATTERNS = [
 _CONTEXT_DEPENDENT = "文脈依存の一般用語で機械検出すると誤検出が多いため、カタログは推敲時の参照に留める"
 _FILLER_UNIMPLEMENTED = "リント側に検出パターンがない定型句で、機械検出は将来のリント拡張に委ねて参照に留める"
 EXEMPTIONS = {
-    # 節 1: 用例を一意に特定するパターンが書けない常用動詞
-    "踏み込む": _CONTEXT_DEPENDENT,
-    "引き返す": _CONTEXT_DEPENDENT,
-    "添える": _CONTEXT_DEPENDENT,
-    "収斂する": _CONTEXT_DEPENDENT,
     # 節 2: 直訳形が正当な説明表現と識別できない行
     "*point to / suggest*": "「指している」「示唆している」は正当な説明表現と機械的に識別できないため参照に留める",
     "*load-bearing*": "「耐力のある」「構造を支える」は正当な物理・構造の記述と機械的に識別できないため参照に留める",
