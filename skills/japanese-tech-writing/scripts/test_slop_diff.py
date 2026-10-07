@@ -9,6 +9,7 @@ ID は DIFF-連番。CLI の入出力契約(原文ファイルと推敲ファイ
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -26,13 +27,22 @@ def run_diff(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+_TEMP_FILES = []
+
+
 def write_temp(content: str, suffix: str = ".md") -> str:
     f = tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", suffix=suffix, delete=False
     )
     f.write(content)
     f.close()
+    _TEMP_FILES.append(f.name)
     return f.name
+
+
+def tearDownModule():
+    for path in _TEMP_FILES:
+        os.unlink(path)
 
 
 class TestSlopDiffCli(unittest.TestCase):
