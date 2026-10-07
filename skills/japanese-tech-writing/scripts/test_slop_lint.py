@@ -3,7 +3,7 @@
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
 ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
 NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
-NEG=対比構文。
+NEG=対比構文、BOLD=太字表示。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -11,6 +11,7 @@ NEG=対比構文。
 import unittest
 
 from slop_lint import lint_text
+from markdown_bold import bold_problems
 
 
 def rules_of(text: str) -> list:
@@ -404,6 +405,105 @@ class TestHeadingDecoration(unittest.TestCase):
             "dash_prohibited",
             rules_of("種別─主題のように並べない。"),
         )
+
+
+class TestBoldNotRendered(unittest.TestCase):
+    """太字の印(**)が表示されない書き方の検査。上流 test_bold_multiline.py の
+    主要ケースを移植したもの。機械の判定は markdown_bold.bold_problems、
+    検査結果としての見え方は lint_text の bold_not_rendered で確かめる。"""
+
+    def bold_findings(self, text: str) -> list:
+        return [f for f in lint_text(text)["findings"] if f["rule"] == "bold_not_rendered"]
+
+    def test_bold_01_かっこで囲まれた太字は直し方付きで検出する(self):
+        problems = bold_problems("次に**「例」**を決めます。")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["how"], "かっこの内側だけを太字にする")
+        self.assertIn("「**例**」", problems[0]["suggest"])
+
+    def test_bold_02_検査結果はerrorとして出る(self):
+        findings = self.bold_findings("次に**「例」**を決めます。")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["severity"], "error")
+        self.assertEqual(findings[0]["line"], 1)
+        self.assertIn("→", findings[0]["snippet"])
+
+    def test_bold_03_通常の太字は検出しない(self):
+        self.assertEqual(bold_problems("**定義語**は太字にする。"), [])
+        self.assertEqual(self.bold_findings("**定義語**は太字にする。"), [])
+
+    def test_bold_04_複数行にまたがる正常な太字は検出しない(self):
+        text = "**太字は1行目から始まり、\n2行目で閉じる。** 続きの文には**別の太字**もある。"
+        self.assertEqual(bold_problems(text), [])
+
+    def test_bold_05_複数行太字の交差でも誤検出しない(self):
+        text = "**太字は1行目から始まり、\n2行目で閉じる。** 続きの文では**次の太字が始まり、\n3行目で閉じる。**"
+        self.assertEqual(bold_problems(text), [])
+
+    def test_bold_06_壊れた複数行太字は検出し改行を保った案を出す(self):
+        text = "次に**「太字は1行目から始まり、\n2行目で閉じる。」**を決めます。"
+        problems = bold_problems(text)
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["line"], 1)
+        self.assertEqual(problems[0]["how"], "かっこの内側だけを太字にする")
+        self.assertIn("「**太字は1行目から始まり、\n2行目で閉じる。**」", problems[0]["suggest"])
+
+    def test_bold_07_空行をまたいでペアにしない(self):
+        self.assertEqual(bold_problems("**段落1で開いたまま\n\n段落2で閉じる。**"), [])
+
+    def test_bold_08_見出しと本文をまたいでペアにしない(self):
+        self.assertEqual(bold_problems("# **見出しの太字\n本文で閉じる。**"), [])
+
+    def test_bold_09_リスト項目をまたいでペアにしない(self):
+        self.assertEqual(bold_problems("- **リスト1で開き\n- リスト2で閉じる**"), [])
+
+    def test_bold_10_複数行のインラインコード内は検出しない(self):
+        self.assertEqual(bold_problems("`code line 1\n**not bold in code**\ncode line 2`"), [])
+
+    def test_bold_11_フェンスコード内は検出しない(self):
+        self.assertEqual(bold_problems("```\n**not bold**\n```\n~~~\n**also not bold**\n~~~"), [])
+
+    def test_bold_12_エスケープしたアスタリスクは検出しない(self):
+        self.assertEqual(bold_problems(r"\*\*これは太字ではない\*\*"), [])
+
+    def test_bold_13_句読点は太字の外に出す案を出す(self):
+        problems = bold_problems("これは**必須です。**詳しくは下に書きます。")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["how"], "句読点を太字の外に出す")
+        self.assertIn("**必須です**。", problems[0]["suggest"])
+
+    def test_bold_14_文字に接する側は半角スペースを入れる案を出す(self):
+        problems = bold_problems("立場は**「勧め」か「決まり」**で決めます。")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["how"], "文字に接する側に半角スペースを入れる")
+        self.assertIn(" **「勧め」か「決まり」** ", problems[0]["suggest"])
+
+    def test_bold_15_開始行を正しく報告する(self):
+        text = "1行目\n2行目\n3行目で**「太字が始まり、\n4行目で閉じる。」**のを決めます。"
+        problems = bold_problems(text)
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["line"], 3)
+
+    def test_bold_16_内側の空白は取る案を出す(self):
+        for src, expected in [
+            ("** 重要 **", "**重要**"),
+            ("次は**重要 **です", "次は**重要**です"),
+            ("次は** 重要**です", "次は**重要**です"),
+        ]:
+            problems = bold_problems(src)
+            self.assertEqual(len(problems), 1, f"{src!r} で1件出るはずが {problems}")
+            self.assertEqual(problems[0]["how"], "太字の内側の空白を取る")
+            self.assertEqual(problems[0]["suggest"], expected)
+
+    def test_bold_17_複数行にまたがる内側空白も検出する(self):
+        problems = bold_problems("** 重要\n重要 **")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["how"], "太字の内側の空白を取る")
+        self.assertIn("**重要\n重要**", problems[0]["suggest"])
+
+    def test_bold_18_crlf改行でも正常な太字は検出しない(self):
+        text = "**太字は1行目から始まり、\r\n2行目で閉じる。** 続きの文には**別の太字**もある。"
+        self.assertEqual(bold_problems(text), [])
 
 
 class TestExistingRules(unittest.TestCase):

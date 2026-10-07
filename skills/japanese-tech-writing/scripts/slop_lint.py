@@ -23,6 +23,8 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
   可視テキストで行う(構造解析への移行までは正規表現による近似)
 - 同一文末の連続検出は段落(隣接する地の文)の内側に限定する
 - 「A ではなく B」構文は上流の正確な字句走査で判定する
+- 太字の印(**)が表示されない書き方の検査を markdown_bold.py から
+  呼び出す(上流の判定機械を共通モジュールへ切り出したもの)
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -34,6 +36,19 @@ import re
 import argparse
 import json
 from typing import List, Dict, Any, Tuple, Optional
+
+try:
+    from markdown_bold import bold_problems
+except ModuleNotFoundError:
+    # spec_from_file_location などで読み込まれた場合でも同ディレクトリの
+    # markdown_bold.py を解決できるようにする
+    import importlib.util
+    from pathlib import Path
+    _bold_spec = importlib.util.spec_from_file_location(
+        "_yomiyasu_markdown_bold", Path(__file__).with_name("markdown_bold.py"))
+    _bold_module = importlib.util.module_from_spec(_bold_spec)
+    _bold_spec.loader.exec_module(_bold_module)
+    bold_problems = _bold_module.bold_problems
 
 # 絵文字正規表現パターン(CJK 統合漢字拡張などのサロゲートペア漢字を除外した厳密な絵文字範囲)
 EMOJI_PATTERN = re.compile(
@@ -382,6 +397,16 @@ def lint_text(text: str) -> Dict[str, Any]:
 
     # 2. 文末重複検査
     findings.extend(check_sentence_end_repetitions(sentences))
+
+    # 2.5 太字が表示されるか(GitHub などで ** がそのまま出ることがある箇所)
+    for p in bold_problems(text):
+        findings.append({
+            "rule": "bold_not_rendered",
+            "line": p["line"],
+            "severity": "error",
+            "message": f"太字の印(**)が表示されない可能性のある書き方が検出されました。GitHub などで太字にならず ** がそのまま表示されることがあります。直し方の案: {p['how']}。",
+            "snippet": f"{p['found']} → {p['suggest']}" if p["suggest"] else p["found"]
+        })
 
     # 3. 語彙・構文パターン検査
     lines = text.split("\n")

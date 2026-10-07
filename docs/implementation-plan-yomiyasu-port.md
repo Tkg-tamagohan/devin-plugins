@@ -72,8 +72,8 @@
 
 ### Phase 4: 太字非表示の検査
 
-- [ ] 上流の太字判定機械を `markdown_bold.py` へ切り出し、`slop_lint.py` へ新ルール `bold_not_rendered`(error)として配線する。
-- [ ] 上流 `test_bold_multiline.py` の主要ケースを `test_slop_lint.py` へ移植し、複数行にまたがる正常な太字、ブロック境界またぎ、かっこの内外の対象を含める。
+- [x] 上流の太字判定機械を `markdown_bold.py` へ切り出し、`slop_lint.py` へ新ルール `bold_not_rendered`(error)として配線する。
+- [x] 上流 `test_bold_multiline.py` の主要ケースを `test_slop_lint.py` へ移植し、複数行にまたがる正常な太字、ブロック境界またぎ、かっこの内外の対象を含める。
 
 受け入れ条件として、「`**「例」**`」の形が修正案つきで検出され、正常な太字は無指摘であることとする。
 
