@@ -45,7 +45,7 @@ DOM 要素は共有だが JS ラッパーは別物なので、main world で `Ob
 
 ## 修飾キー付きホイールは xdotool で送出する
 
-`computer` ツールの `scroll` アクションに `key: "shift"` を渡しても、生成される wheel イベントは `shiftKey=false` のまま届く(実測で確認)。
+`computer` ツールの `scroll` アクションに `key: "shift"` を渡しても、生成される wheel イベントは `shiftKey=false` のまま届く(2026-10 時点の Devin VM / Chrome 137 で実測)。
 Shift+スクロール等の修飾キー判定を検証するときは `xdotool` で修飾キーを押したままホイールを打つ。
 
 ```bash
@@ -61,7 +61,7 @@ DISPLAY=:0 xdotool keydown ctrl sleep 0.3 click 4 sleep 0.2 keyup ctrl    # Ctrl
 
 ## 広告ブロッカー常駐環境での障害
 
-メインプロファイルに uBlock Origin 等が常駐している場合、`chrome-extension://<id>/options/options.html` への直接遷移が `ERR_BLOCKED_BY_CLIENT` で遮断されることがある。
+メインプロファイルに uBlock Origin 等が常駐している場合、`chrome-extension://<id>/options/options.html` への直接遷移が `ERR_BLOCKED_BY_CLIENT` で遮断されることがある(2026-10 時点の Devin VM / Chrome 137 + uBlock Origin で実測)。
 `chrome://extensions` → 詳細 →「拡張機能のオプション」経由なら開ける。
 広告表示中の挙動など実広告が要る検証はブロッカー未搭載の別プロファイルで行う。
 
