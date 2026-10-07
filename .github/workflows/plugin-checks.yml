@@ -25,6 +25,7 @@ jobs:
         run: |
           python3 test_slop_lint.py
           python3 test_catalog_consistency.py
+          python3 test_slop_diff.py
 
       - name: 生成スクリプトの回帰テスト
         working-directory: skills/plugin-authoring/scripts

@@ -63,10 +63,10 @@
 
 ### Phase 3: 差分検査ツールの導入
 
-- [ ] `markdown_visibility.py` と `slop_diff.py` をベンダリングし、出典ヘッダを記す。
-- [ ] `slop_diff.py` の入出力(原文ファイルと推敲ファイルの 2 引数、`--json` と `--endings` オプション)を固定する回帰テスト `test_slop_diff.py` を新設する。
-- [ ] `.github/workflows/plugin-checks.yml` の回帰テストステップと、本書「引き継ぎ手順」の検証一覧へ `test_slop_diff.py` を加える。
-- [ ] SKILL.md の「既存文章の解体と再構築」節に推敲後の差分検査の手順を追記し、実行例を「機械検査」節の既存手順に倣う形で示す。
+- [x] `markdown_visibility.py` と `slop_diff.py` をベンダリングし、出典ヘッダを記す。
+- [x] `slop_diff.py` の入出力(原文ファイルと推敲ファイルの 2 引数、`--json` と `--endings` オプション)を固定する回帰テスト `test_slop_diff.py` を新設する。
+- [x] `.github/workflows/plugin-checks.yml` の回帰テストステップと、本書「引き継ぎ手順」の検証一覧へ `test_slop_diff.py` を加える。
+- [x] SKILL.md の「既存文章の解体と再構築」節に推敲後の差分検査の手順を追記し、実行例を「機械検査」節の既存手順に倣う形で示す。
 
 受け入れ条件として、依頼文を動作文へ書き換えたサンプルで文末種別のずれが検出されること、CI が通ることとする。
 
@@ -94,7 +94,7 @@
 
 - 現在地は本書のチェックリストと、devin-plugins でマージ済みの該当 PR から確認する。
 - ブランチは `devin/$(date +%s)-yomiyasu-port-p<N>` とし、フェーズごとに PR を分ける。
-- ローカル検証の一式は `test_slop_lint.py`、`test_catalog_consistency.py`、`test_new_entry.py`、`check_plugin.py`(`--version-base origin/main`、事前に `git fetch origin main`)、全 Markdown の一括リント(`--strict`)である。
+- ローカル検証の一式は `test_slop_lint.py`、`test_catalog_consistency.py`、`test_slop_diff.py`、`test_new_entry.py`、`check_plugin.py`(`--version-base origin/main`、事前に `git fetch origin main`)、全 Markdown の一括リント(`--strict`)である。
 - 上流ファイルの差分確認は `git clone` した yomiyasu リポジトリで行う。
 - ライセンス関係の新規同梱物が出た場合は `rules/library-license` の手順に従う。
 
