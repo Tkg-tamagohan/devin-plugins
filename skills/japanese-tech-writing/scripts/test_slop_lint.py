@@ -3,7 +3,7 @@
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
 ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
 NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
-NEG=対比構文、BOLD=太字表示。
+NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -309,6 +309,19 @@ class TestNakaguroParallel(unittest.TestCase):
             rules_of("アーサー・C・クラークの例を挙げる。"),
         )
 
+    def test_naka_09_太字の語を含む並列も検出する(self):
+        # 装飾記号の除去を忘れると中黒の前後が * になり並列と認識できない回帰
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("**作成**・**推敲**を進める。"),
+        )
+
+    def test_naka_10_片側だけ太字の並列も検出する(self):
+        self.assertIn(
+            "nakaguro_parallel",
+            rules_of("**作成**・推敲を進める。"),
+        )
+
 
 class TestOneSentencePerLine(unittest.TestCase):
     """一行に複数の文がある形の検出。整形規範「一文ごとに改行する」に対応"""
@@ -504,6 +517,56 @@ class TestBoldNotRendered(unittest.TestCase):
     def test_bold_18_crlf改行でも正常な太字は検出しない(self):
         text = "**太字は1行目から始まり、\r\n2行目で閉じる。** 続きの文には**別の太字**もある。"
         self.assertEqual(bold_problems(text), [])
+
+
+class TestStructuralScan(unittest.TestCase):
+    """analyze_markdown 移行: ブロック種別・保護領域に基づく検査対象の切り分け"""
+
+    def test_struct_01_参照リンク定義の語彙は検出しない(self):
+        # [label]: url "title" 形式の参照定義は本文ではなくデータのため語彙検査外
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of('[ref]: https://example.com "静かに壊れる例の説明"'),
+        )
+
+    def test_struct_02_setext見出しも見出しとして扱う(self):
+        # === 下線の直前行は ATX 見出しと同じ見出し規則で検査する
+        self.assertIn(
+            "redundant_bracket",
+            rules_of("概要（素の出力）\n===\n本文です。"),
+        )
+
+    def test_struct_03_HTMLブロックの語彙は検出しない(self):
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("<div>\n<span>これは静かに壊れる例です。</span>\n</div>"),
+        )
+
+    def test_struct_04_入れ子引用の語彙は検出しない(self):
+        # > > の入れ子引用も例示の可能性が高いため語彙検査の対象外
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("> > これは静かに壊れる例です。"),
+        )
+
+    def test_struct_05_表行の語彙は検出しない(self):
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("| 項目 | 説明 |\n| --- | --- |\n| 例 | 静かに壊れる |"),
+        )
+
+    def test_struct_06_URL内部のスロップ語彙は検出しない(self):
+        # 裸の URL は不透明領域として空白化される
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("詳細は https://example.com/静かに壊れる を参照する。"),
+        )
+
+    def test_struct_07_本文の比喩動詞は従来どおり検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("障害時に設定が静かに壊れることがある。"),
+        )
 
 
 class TestExistingRules(unittest.TestCase):
