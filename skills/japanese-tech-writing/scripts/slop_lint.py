@@ -16,6 +16,14 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 - 助詞「の」で数珠つなぎになった名詞連結(過圧縮)の検出を追加
 - 中黒(・)の日本語並列、一行の複数文、見出しの罫線(U+2500)の検出を追加
 
+上流の変更で取り込んだ調整点:
+- 比喩動詞の追加(Xが壊れる、踏み込む、引き返す、添える、収斂)と
+  「Xが壊れる」「静かに壊れる」の同一動詞への二重反応の回避
+- 絵文字検査はインラインコード、URL、リンク宛先、HTML を除いた
+  可視テキストで行う(構造解析への移行までは正規表現による近似)
+- 同一文末の連続検出は段落(隣接する地の文)の内側に限定する
+- 「A ではなく B」構文は上流の正確な字句走査で判定する
+
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
 標準ライブラリのみで動作する。
@@ -81,12 +89,17 @@ SLOP_WORDS = [
 
 # 比喩動詞・AI 偏愛動詞パターン
 METAPHOR_VERB_PATTERNS = [
-    (r"(地味に|よく|じわじわ)効[きくいた]", "比喩動詞「効く」の過剰使用"),
+    (r"(地味に|よく|じわじわ)効[かきくけいた]", "比喩動詞「効く」の過剰使用"),
+    (r"(データ|仕様|設計|環境|ビルド|システム|秩序)が(静かに)?壊れ", "比喩動詞「壊れる」"),
     (r"静かに(壊れ|落ち|失敗|沈黙)", "英語直訳「静かに壊れる (silently fail)」"),
     (r"黙って(無視|捨て|スキップ|破棄)", "英語直訳「黙って無視される」"),
     (r"側に倒[すしせ]", "判断を方向で表現する「〜側に倒す」"),
     (r"時間[をに]溶か[したす]", "比喩動詞「時間を溶かす」"),
     (r"(1つずつ|一つずつ)潰[していくす]", "比喩動詞「潰す」"),
+    (r"(実装|詳細|コード|設計|内部|仕組み|領域|本質)(に|まで|へ)踏み込[んむみま]", "比喩動詞「踏み込む」"),
+    (r"動かしながら引き返[すし]", "比喩動詞「引き返す」"),
+    (r"代わりに添え[るた]", "比喩動詞「添える」"),
+    (r"(議論|意見|結論|方向性|価格|話題|検討)が[^。！？!?]*?収斂", "比喩動詞「収斂する」"),
     (r"した瞬間に?", "英語直訳「〜した瞬間 (the moment ...)」"),
     (r"(前提|基盤)が崩れ[るた]", "抽象比喩「前提が崩れる」"),
     (r"文化が醸成", "非生物主語「文化が醸成される」"),
@@ -107,6 +120,35 @@ FILLER_PATTERNS = [
 
 # ネガティブパラレリズム(A ではなく B)
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
+_NEGATIVE_PARALLELISM_DEFAULT = NEGATIVE_PARALLELISM_PATTERN
+
+
+def _has_negative_parallelism(text: str) -> bool:
+    """既定パターンと同等の「A ではなく B」構文の存在判定
+
+    リテラル「ではなく」の直前に文区切り(。、)を挟まず、直後にも
+    実質的な後項が続く出現だけを数える。リテラルは自己重複しない
+    ため、見つかった位置の次から探索を進める。
+    """
+    pattern = NEGATIVE_PARALLELISM_PATTERN
+    default = _NEGATIVE_PARALLELISM_DEFAULT
+    if (type(pattern) is not type(default) or pattern.pattern != default.pattern
+            or pattern.flags != default.flags):
+        return "ではなく" in text and bool(pattern.search(text))
+
+    literal = "ではなく"
+    offset = 0
+    while True:
+        position = text.find(literal, offset)
+        if position == -1:
+            return False
+        end = position + len(literal)
+        if position > 0 and text[position - 1] not in "。、" and end < len(text):
+            if text[end] not in "。、":
+                return True
+            if text[end] == "、" and end + 1 < len(text) and text[end + 1] not in "。、":
+                return True
+        offset = position + len(literal)
 
 # 名詞の過剰連結(サ変名詞の数珠つなぎ)。助詞「の」で 3 つ以上の名詞が
 # 連結している断片を拾い、サ変名詞・抽象名詞の個数で絞り込む。
@@ -233,7 +275,10 @@ def check_sentence_end_repetitions(sentences: List[Tuple[int, Optional[str]]]) -
         prev_line, prev_s, prev_type = end_types[i - 1]
         curr_line, curr_s, curr_type = end_types[i]
 
-        if curr_type not in ("その他", "boundary") and curr_type == prev_type:
+        # 隣接する地の文だけを段落内として数え、空行や除外した
+        # ブロック(見出し、箇条書き、引用、表など)を挟めば数え直す
+        same_paragraph = curr_line <= prev_line + 1
+        if same_paragraph and curr_type not in ("その他", "boundary") and curr_type == prev_type:
             count += 1
             if count == 3:
                 findings.append({
@@ -291,6 +336,20 @@ def analyze_markdown_metrics(text: str) -> Dict[str, Any]:
         "bold_count": bold_count,
         "bold_per_1000": round(bold_per_1000, 2),
     }
+
+
+def _emoji_visible_text(line: str) -> str:
+    """絵文字検査用に、装飾として機能しない領域を除いた可視テキストを返す
+
+    インラインコード、画像記法、リンク宛先、autolink、HTML タグ、
+    裸の URL の内部にある絵文字は装飾ではないため検査対象から外す。
+    """
+    text = re.sub(r"`[^`]*`", "　", line)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "　", text)
+    text = re.sub(r"\]\([^)]*\)", "]", text)
+    text = re.sub(r"<[^>\s]*>", "　", text)
+    text = re.sub(r"https?://[^\s<>()]+|www\.[^\s<>()]+", "　", text)
+    return text
 
 
 def lint_text(text: str) -> Dict[str, Any]:
@@ -389,8 +448,9 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "snippet": line.strip()
                 })
 
-        # 絵文字検知(見出し・本文問わず禁止)
-        emoji_matches = EMOJI_PATTERN.findall(line)
+        # 絵文字検知(見出し・本文問わず禁止)。コード片や URL の内部に
+        # ある絵文字は装飾ではないため、検査前に可視テキストへ置き換える
+        emoji_matches = EMOJI_PATTERN.findall(_emoji_visible_text(line))
         if emoji_matches:
             findings.append({
                 "rule": "emoji_prohibited",
@@ -474,8 +534,32 @@ def lint_text(text: str) -> Dict[str, Any]:
                 })
 
         # 比喩動詞パターン
+        kowareru_span = None
         for pattern, desc in METAPHOR_VERB_PATTERNS:
-            if re.search(pattern, plain_text):
+            # 「収斂」の先行確認。文境界またぎ防止ガード [^。！？!?]*? は
+            # マッチしない行で全位置からの再試行を伴うため、対象語がなければ省く
+            if pattern == r"(議論|意見|結論|方向性|価格|話題|検討)が[^。！？!?]*?収斂" and "収斂" not in plain_text:
+                continue
+            if desc == "英語直訳「静かに壊れる (silently fail)」" and kowareru_span:
+                # 「Xが壊れる」と「静かに壊れる」が同一動詞に二重反応することを防止
+                for m in re.finditer(pattern, plain_text):
+                    span = (m.start(), m.end())
+                    if kowareru_span[0] <= span[0] and span[1] <= kowareru_span[1]:
+                        continue
+                    findings.append({
+                        "rule": "metaphor_verb",
+                        "line": line_no,
+                        "severity": "warn",
+                        "message": f"{desc}が検出されました。具体的な操作や状態変化に書き直してください。",
+                        "snippet": line.strip()
+                    })
+                    break
+                continue
+
+            m = re.search(pattern, plain_text)
+            if m:
+                if desc == "比喩動詞「壊れる」":
+                    kowareru_span = (m.start(), m.end())
                 findings.append({
                     "rule": "metaphor_verb",
                     "line": line_no,
@@ -496,15 +580,14 @@ def lint_text(text: str) -> Dict[str, Any]:
                 })
 
         # ネガティブパラレリズム
-        if NEGATIVE_PARALLELISM_PATTERN.search(plain_text):
-            if "ではなく" in plain_text:
-                findings.append({
-                    "rule": "negative_parallelism",
-                    "line": line_no,
-                    "severity": "info",
-                    "message": "「A ではなく B」構文が検出されました。誤解を解くために残す場合は否定の根拠を一文添え、それ以外は肯定文で直接書けないか検討してください。",
-                    "snippet": line.strip()
-                })
+        if _has_negative_parallelism(plain_text):
+            findings.append({
+                "rule": "negative_parallelism",
+                "line": line_no,
+                "severity": "info",
+                "message": "「A ではなく B」構文が検出されました。誤解を解くために残す場合は否定の根拠を一文添え、それ以外は肯定文で直接書けないか検討してください。",
+                "snippet": line.strip()
+            })
 
         # 名詞の過剰連結(サ変名詞の数珠つなぎ)。最初の候補が閾値未満でも後続を
         # 評価し、閾値を満たす候補があれば 1 行につき 1 件だけ出す

@@ -2,7 +2,8 @@
 
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
 ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
-NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線。
+NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
+NEG=対比構文。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -98,6 +99,160 @@ class TestSentenceEndRepetition(unittest.TestCase):
         self.assertNotIn(
             "sentence_end_repetition",
             rules_of(text),
+        )
+
+    def test_end_04_空行の段落境界で連続数が切り離される(self):
+        # 空行を挟んだ別段落は同一文末でも連続と数えない
+        text = "値は正しいです。\n形式も正しいです。\n\n結果も正しいです。\nまとめも正しいです。\n"
+        self.assertNotIn(
+            "sentence_end_repetition",
+            rules_of(text),
+        )
+
+    def test_end_05_箇条書きなどの除外ブロックを挟んでも数え直す(self):
+        text = "値は正しいです。\n形式も正しいです。\n- a\n- b\n結果も正しいです。\n"
+        self.assertNotIn(
+            "sentence_end_repetition",
+            rules_of(text),
+        )
+
+
+class TestMetaphorVerbs(unittest.TestCase):
+    """上流で追加された比喩動詞パターンと同一動詞への二重反応の回避"""
+
+    def test_met_01_名詞主語の壊れるを検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("設計が壊れる可能性がある。"),
+        )
+
+    def test_met_02_壊れると静かに壊れるは同一動詞に二重反応しない(self):
+        findings = lint_text("データが静かに壊れることがある。")["findings"]
+        count = sum(1 for f in findings if f["rule"] == "metaphor_verb")
+        self.assertEqual(1, count)
+
+    def test_met_03_別動詞の静かに系は重複回避しない(self):
+        # 「設計が壊れる」の範囲外にある「静かに失敗」は独立して検出する
+        findings = lint_text("設計が壊れると、別の箇所が静かに失敗する。")["findings"]
+        count = sum(1 for f in findings if f["rule"] == "metaphor_verb")
+        self.assertEqual(2, count)
+
+    def test_met_04_対象名詞への踏み込むを検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("内部実装まで踏み込んで確認する。"),
+        )
+
+    def test_met_05_対象外の名詞への踏み込むは検出しない(self):
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("議論に踏み込む。"),
+        )
+
+    def test_met_06_動かしながら引き返すを検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("動かしながら引き返した。"),
+        )
+
+    def test_met_07_代わりに添えるを検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("経路を代わりに添える。"),
+        )
+
+    def test_met_08_並置されない添えるは検出しない(self):
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("説明を添える。"),
+        )
+
+    def test_met_09_主語つきの収斂を検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("議論が収斂するまで待つ。"),
+        )
+
+    def test_met_10_収斂は文境界を越えない(self):
+        # 主語と「収斂」が別文に分かれている形は対象外
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("議論がある。別件で収斂した。"),
+        )
+
+    def test_met_11_効くの語尾変化を検出する(self):
+        self.assertIn(
+            "metaphor_verb",
+            rules_of("この修正は地味に効かない。"),
+        )
+
+    def test_met_12_効果などの別語は検出しない(self):
+        self.assertNotIn(
+            "metaphor_verb",
+            rules_of("役割が効果を発揮する。"),
+        )
+
+
+class TestEmojiVisibleText(unittest.TestCase):
+    """絵文字検査は可視テキストで行い、コードや URL の内部は対象外とする"""
+
+    def test_emoji_01_本文の絵文字は検出する(self):
+        self.assertIn(
+            "emoji_prohibited",
+            rules_of("作業が完了しました。✅"),
+        )
+
+    def test_emoji_02_インラインコード内の絵文字は検出しない(self):
+        self.assertNotIn(
+            "emoji_prohibited",
+            rules_of("`check ✅` を実行する。"),
+        )
+
+    def test_emoji_03_裸のURL内の絵文字は検出しない(self):
+        self.assertNotIn(
+            "emoji_prohibited",
+            rules_of("詳細は https://example.com/✅ を参照。"),
+        )
+
+    def test_emoji_04_リンク宛先と画像の絵文字は検出しない(self):
+        self.assertNotIn(
+            "emoji_prohibited",
+            rules_of("![icon](icon-✅.png) を貼る。"),
+        )
+
+    def test_emoji_05_リンク文言の絵文字は検出する(self):
+        self.assertIn(
+            "emoji_prohibited",
+            rules_of("[✅リンク](https://example.com) を参照。"),
+        )
+
+    def test_emoji_06_autolink内の絵文字は検出しない(self):
+        self.assertNotIn(
+            "emoji_prohibited",
+            rules_of("<https://example.com/✅> を参照。"),
+        )
+
+
+class TestNegativeParallelism(unittest.TestCase):
+    """「A ではなく B」構文の正確な存在判定"""
+
+    def test_neg_01_対比構文は検出する(self):
+        self.assertIn(
+            "negative_parallelism",
+            rules_of("これは手順ではなく、見解です。"),
+        )
+
+    def test_neg_02_文頭に孤立したではなくは検出しない(self):
+        # 「ではなく」の直前が文区切りなら対比の前項を欠くため対象外
+        self.assertNotIn(
+            "negative_parallelism",
+            rules_of("確認した。ではなく、次へ進む。"),
+        )
+
+    def test_neg_03_文末にぶら下がるだけのではなくは検出しない(self):
+        self.assertNotIn(
+            "negative_parallelism",
+            rules_of("確認した。ではなく"),
         )
 
 
