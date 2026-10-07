@@ -1,6 +1,6 @@
 ---
 name: chrome-extension-real-input-testing
-description: MV3 Chrome 拡張を実 UI(trusted イベント)で検証するときに使用する。拡張 reload 後の content script 再注入、YouTube ボットウォール下での DOM レベル検証、isolated world でのプロパティ偽装不可、ミニプレイヤー検証、オーバーレイ位置の座標系を扱う。未パッケージ読み込みや i18n、サービスワーカー起床、CDP アタッチなどのセットアップ手順自体は対象外。
+description: MV3 Chrome 拡張を実 UI(trusted イベント)で検証するときに使用する。拡張 reload 後の content script 再注入、YouTube ボットウォール下での DOM レベル検証、isolated world でのプロパティ偽装不可、ミニプレイヤー検証、オーバーレイ位置の座標系、修飾キー付きホイールの xdotool 送出、広告ブロッカー常駐環境での障害を扱う。未パッケージ読み込みや i18n、サービスワーカー起床、CDP アタッチなどのセットアップ手順自体は対象外。
 ---
 
 # Chrome 拡張(MV3)を実 UI で検証する際のノウハウ
@@ -43,6 +43,28 @@ DOM 要素は共有だが JS ラッパーは別物なので、main world で `Ob
 一方 `paused`/`duration`/`currentTime` などのプロパティ偽装は届かない。
 これらのゲートは「実状態を作る」(別ページで実再生してから一時停止する等)か、content script 側の world を直接評価できる手段(CDP で isolated world コンテキストを選ぶ等)に任せる。
 
+## 修飾キー付きホイールは xdotool で送出する
+
+`computer` ツールの `scroll` アクションに `key: "shift"` を渡しても、生成される wheel イベントは `shiftKey=false` のまま届く(実測で確認)。
+Shift+スクロール等の修飾キー判定を検証するときは `xdotool` で修飾キーを押したままホイールを打つ。
+
+```bash
+# カーソルは computer ツールの mouse_move で対象要素上に置いてから実行
+DISPLAY=:0 xdotool keydown Shift sleep 0.3 click 4 sleep 0.2 keyup Shift   # Shift+上スクロール
+DISPLAY=:0 xdotool keydown ctrl sleep 0.3 click 4 sleep 0.2 keyup ctrl    # Ctrl+上スクロール
+```
+
+- `click 4` が上スクロール、`click 5` が下スクロール。
+  1 クリックあたり `deltaY=±120` で届いた。
+- Ctrl+スクロール捕捉を検証する際は、ブラウザのページズームが発生しないこと(`devicePixelRatio` 不変)も合わせて確認すると preventDefault の証拠になる。
+- 効いたかどうかは、対象ページ側に `document.addEventListener('wheel', e => ..., true)` を capture 相で貼り `e.shiftKey/ctrlKey` を記録して判定する。
+
+## 広告ブロッカー常駐環境での障害
+
+メインプロファイルに uBlock Origin 等が常駐している場合、`chrome-extension://<id>/options/options.html` への直接遷移が `ERR_BLOCKED_BY_CLIENT` で遮断されることがある。
+`chrome://extensions` → 詳細 →「拡張機能のオプション」経由なら開ける。
+広告表示中の挙動など実広告が要る検証はブロッカー未搭載の別プロファイルで行う。
+
 ## ミニプレイヤー検証
 
 - watch ページで `i` キーを押すとプレイヤーが `ytd-miniplayer` 配下に移り、ページがフィード(home 等)へ遷移する。
@@ -60,6 +82,9 @@ zoom 領域を DOM 座標から計算するときは除算して画面内に収�
 - オーバーレイの表示寿命は操作停止から約 3 秒のため、スクロール直後に即スクリーンショットを取らないとフェードして「見えない」判定を誤る。
 - Shorts フィード遷移は同一 video 要素を使い回すことがある。
 - 遷移後の状態リセット検証は、オーバーレイの F や時刻が新動画先頭相当になるか、旧 fps 確定値を引きずらないかで見る。
+- 拡張が `yt-frame-scrub:step` のような CustomEvent を `document` 上で発行するなら、そのイベントとオーバーレイの opacity を数値証拠として記録すると録画の視認性が上がる。
+- ボットウォールが出ない環境では未ログインでも実動画が読み込まれることがある。
+  interstitial が出た場合のみ回避策を挟む。
 
 ## 原則
 
