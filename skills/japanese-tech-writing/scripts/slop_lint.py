@@ -486,6 +486,26 @@ _FRAGMENT_RUN = re.compile(r"(?:^|(?<=[。！？]))(?:[^。！？、\s「」『�
 # 引用の区切り。「」とリンクは中身を伏せて断片化を防ぐための置換対象
 _QUOTED_SEGMENT = re.compile(r"「[^「」]*」|『[^『』]*』|\[[^\[\]]*\]")
 
+
+def _mask_quoted_segments(text):
+    """対応の取れた引用とリンクを、ネストを含めて一回の走査と累積和で伏せる"""
+    closing = {"「": "」", "『": "』", "[": "]"}
+    stacks = {closer: [] for closer in closing.values()}
+    changes = [0] * (len(text) + 1)
+    for index, char in enumerate(text):
+        if char in closing:
+            stacks[closing[char]].append(index)
+        elif char in stacks and stacks[char]:
+            start = stacks[char].pop()
+            changes[start] += 1
+            changes[index + 1] -= 1
+    depth = 0
+    result = []
+    for index, char in enumerate(text):
+        depth += changes[index]
+        result.append(" " if depth else char)
+    return "".join(result)
+
 # 1行の文区切り(文末記号の直後)
 _LINE_SENTENCE_BREAK = re.compile(r"(?<=[。！？!?])")
 
@@ -537,7 +557,7 @@ def _ends_with_question(sentence):
 _BOLD_LABEL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\*\*[^*]+?(?:\*\*\s*[:：]|[:：]\s*\*\*)")
 # ATX(「## まとめ」「## まとめ ##」)と setext(タイトル行だけが heading に
 # 分類される)の両形式を拾うため、# は任意扱いにする
-_SUMMARY_HEADING = re.compile(r"^(?:#{1,6}\s*)?(まとめ|おわりに)\s*#*\s*$")
+_SUMMARY_HEADING = re.compile(r"^(?:#{1,6}\s*)?(まとめ|おわりに)(?:\s+#+)?\s*$")
 
 # ネガティブパラレリズム(A ではなく B)
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
@@ -778,21 +798,21 @@ def _paragraph_prose_parts(analysis):
 
 def _fragment_run_line_numbers(analysis):
     """段落内の隣接する地の文をつないで短文連打を拾う。
-    一文一行の規範では断片は行をまたぐため、行ごとの判定では拾えない"""
+    一文一行の規範では断片は行をまたぐため、行ごとの判定では拾えない。
+    引用やリンク内の文は数に入れない(行またぎの引用も連結後に伏せる)"""
     hit_lines = set()
     for parts in _paragraph_prose_parts(analysis):
-        masked = [(n, _QUOTED_SEGMENT.sub("「」", v)) for n, v in parts]
-        joined = "".join(v for _, v in masked)
+        joined = _mask_quoted_segments("".join(v for _, v in parts))
         if joined.count("。") + joined.count("！") < 3:
             continue
         offsets = []
         total = 0
-        for _, v in masked:
+        for _, v in parts:
             offsets.append(total)
             total += len(v)
         for match in _FRAGMENT_RUN.finditer(joined):
             index = bisect_right(offsets, match.start()) - 1
-            hit_lines.add(masked[index][0])
+            hit_lines.add(parts[index][0])
     return hit_lines
 
 
