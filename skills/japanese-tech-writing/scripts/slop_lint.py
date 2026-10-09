@@ -10,7 +10,8 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 本スキルとの調整点:
 - 太字頻度と箇条書き比率は info に降格(定義語の太字・定義列挙の
   箇条書きは本スキルが許容するため、警告ではなく情報として出す)
-- 行内のダッシュ記号(em ダッシュ等)の検出を追加(本スキルの整形規範)
+- 行内のダッシュ記号(em ダッシュ等)の検出を追加(本スキルの整形規範。
+  v1.1.1 追従で上流の3ルール機械へ置き換え済み)
 - 「〜に他なりません」の検出が波線の直前に限られていた問題を修正
 - 「」で囲まれた言及(禁止表現の例示)を語彙・構文検査の対象から除外
 - 助詞「の」で数珠つなぎになった名詞連結(過圧縮)の検出を追加
@@ -29,7 +30,12 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 - v1.1.1 追従: SLOP_WORD_PATTERNS(形で確かめる語彙)、フィラーの
   文単位走査と FILLER_NOTES、INFO_SENTENCE_PATTERNS、もちろん
   短答・断片連続・太字ラベル列挙・まとめ見出しの info 検出、
-  リテラル事前絞り込み(_narrowed_document_rows)による走査削減
+  リテラル事前絞り込み(_narrowed_document_rows)による走査削減。
+  ダッシュ検査は単一パターンの禁止から3ルール(挿入・読点並べの
+  閉じ・装飾)へ置き換え、区間・出典・引用・図罫線を免除し
+  1文書3件に制限。否定構文は「AでもBでもない。Cだ。」
+  「Aじゃない、Bです。」と段落内ソフト改行またぎを検出し、
+  「でもある」で終わる対比を免除、多発は info で指摘する
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -40,6 +46,8 @@ import sys
 import re
 import argparse
 import json
+import unicodedata
+from bisect import bisect_right
 from itertools import chain, compress
 from operator import is_
 from typing import List, Dict, Any, Tuple, Optional
@@ -88,9 +96,119 @@ EMOJI_PATTERN = re.compile(
     r"|[\u2B50-\u2B55]"
 )
 
-# ダッシュ記号(em ダッシュ、horizontal bar、2 倍ダッシュ)と罫線(U+2500)。
-# 範囲を示す en ダッシュ(U+2013)は対象外。
-DASH_PATTERN = re.compile(r"[—―─]|——")
+# ダッシュ類。em ダッシュ(—)、horizontal bar(―)、罫線(─ ━)。
+# en ダッシュ(–)、長音(ー)、波ダッシュ(〜)は含めない。
+DASH_CHARS = "—―─━"
+_DASH_RUN = re.compile("[" + DASH_CHARS + "]+")
+# 木構造や ASCII 図に使う罫線。これを含む行は図とみなし、ダッシュの検査をしない。
+_DIAGRAM_CHARS = re.compile(r"[│┃├┣└┗┌┏┐┓┘┛┬┳┴┻┼╋╭╮╰╯]")
+# 短い語を読点で3つ以上並べ、ダッシュで閉じて文を終える形(「速さ、軽さ、静けさ──。」)。文ごとに見る。
+_LIST_ITEM = r"[^、。！？!?\s" + DASH_CHARS + "]{1,12}"
+_DASH_LIST_ENDING = re.compile(
+    r"(?:^|(?<=[。！？!?]))\s*" + _LIST_ITEM + "(?:、[ \t　]*" + _LIST_ITEM + "){2,}[ \t　]*[" + DASH_CHARS + "]+(?:[。．.]|$)")
+# 出典ラベル、著者と書名、英語の著者名と書誌情報を手掛かりにする。短い行というだけでは除外しない。
+_ATTRIBUTION_LABEL = re.compile(r"^(?:出典|引用元|著者|Source|Author)\s*[:：]", re.IGNORECASE)
+_ATTRIBUTION_BOOK = re.compile(r"^[一-龥々ァ-ヴーA-Za-z .・'’-]+『[^』]+』(?:[ \t　]*(?:（[^）]*）|\([^)]*\)))*[。.]?$")
+_ATTRIBUTION_ENGLISH = re.compile(r"^[A-Z][A-Za-z.'’−-]*(?:[ \t]+[A-Z][A-Za-z.'’−-]*)+,[ \t]+\S")
+# 「人間」「作業時間」「目線」などの普通名詞は、区間を表す接尾辞と取り違えない。
+_NON_ROUTE_ENDINGS = ("人間", "時間", "期間", "空間", "世間", "仲間", "手間", "目線", "視線", "動線", "光線", "伏線", "生命線", "方便", "利便", "不便")
+
+
+def _is_dash_attribution(text):
+    text = text.strip()
+    if not text or text[0] not in DASH_CHARS:
+        return False
+    credit = text.lstrip(DASH_CHARS + " \t　")
+    return bool(_ATTRIBUTION_LABEL.match(credit) or _ATTRIBUTION_BOOK.match(credit)
+                or _ATTRIBUTION_ENGLISH.match(credit))
+
+
+def _mask_quoted_segments(text):
+    """対応の取れた引用とリンクを、ネストを含めて一回の走査と累積和で伏せる"""
+    closing = {"「": "」", "『": "』", "[": "]"}
+    stacks = {closer: [] for closer in closing.values()}
+    changes = [0] * (len(text) + 1)
+    for index, char in enumerate(text):
+        if char in closing:
+            stacks[closing[char]].append(index)
+        elif char in stacks and stacks[char]:
+            start = stacks[char].pop()
+            changes[start] += 1
+            changes[index + 1] -= 1
+    depth = 0
+    result = []
+    for index, char in enumerate(text):
+        depth += changes[index]
+        result.append(" " if depth else char)
+    return "".join(result)
+
+
+def _mask_route_dashes(text):
+    """隣接する名詞ランをダッシュごとに一度だけ走査し、正規表現のバックトラックを避ける"""
+    def noun_char(char):
+        return "一" <= char <= "龥" or "ァ" <= char <= "ヴ" or char in "ー々"
+
+    result = list(text)
+    for match in _DASH_RUN.finditer(text):
+        left, right = match.start(), match.end()
+        if right - left != 1 or left == 0 or right == len(text):
+            continue
+        if not noun_char(text[left - 1]) or not noun_char(text[right]):
+            continue
+        end = right
+        while end < len(text) and noun_char(text[end]):
+            end += 1
+        destination = text[right:end]
+        for index, char in enumerate(destination):
+            if char not in "間線便":
+                continue
+            end = index + 1
+            suffix_length = 2 if destination.endswith("区間", 0, end) else 1
+            if end > suffix_length and not destination.endswith(_NON_ROUTE_ENDINGS, 0, end):
+                result[left] = " "
+                break
+    return "".join(result)
+
+
+# ダッシュで補足や言い換えを挟む形(「今日——正確には昨日——連絡しました。」)
+_DASH_INSERTION = re.compile("[" + DASH_CHARS + "]{1,2}[^" + DASH_CHARS + "。\n]{1,40}[" + DASH_CHARS + "]{1,2}")
+# 小説などで点数が大きく下がらないよう、ダッシュの指摘は1文書あたりこの件数までにする。
+DASH_FINDING_LIMIT = 3
+
+# リンクの直後に著者などを添える区切り(「[記事](URL) — 著者氏」)。表示上のテキストでは URL が空白になる。
+_LINK_ATTRIBUTION = re.compile(r"\][ \t]*[" + DASH_CHARS + "]+")
+
+
+def _dash_finding(text, line_no, snippet):
+    """散文の装飾ダッシュを1行1件だけ指摘する。図・区切り線・出典は散文ではない"""
+    if not _DASH_RUN.search(text):
+        return None
+    if _is_dash_attribution(text):
+        text = text.lstrip().lstrip(DASH_CHARS)
+    text = _mask_route_dashes(_mask_quoted_segments(_LINK_ATTRIBUTION.sub("]", text))).strip()
+    rest = text.strip(DASH_CHARS + " 　")
+    if not _DASH_RUN.search(text) or _DIAGRAM_CHARS.search(text) or not rest:
+        return None
+    # 「――◆――」のように記号だけを挟んだ区切り線や、出典表記の行は散文ではない。
+    if all(unicodedata.category(ch)[0] in "PSZ" or ch in DASH_CHARS for ch in rest):
+        return None
+    if _DASH_LIST_ENDING.search(text):
+        rule = "dash_list_ending"
+        message = ("名詞を読点で並べて末尾を「──」などのダッシュで閉じる書き方が検出されました。余韻を装う装飾に見えやすいため、"
+                   "何についての列挙かを述語で言い切ってください。文脈から述語が分からない場合は、推測で補わず書き手に確かめてください。")
+    elif _DASH_INSERTION.search(text):
+        rule = "dash_insertion"
+        message = ("補足や言い換えをダッシュで挟む書き方が検出されました。読点や助詞、括弧でつなぐか、文を分けてください。"
+                   "ただし、小説や随筆で書き手が文体として使っている場合や、引用は残してかまいません。")
+    else:
+        rule = "dash_decoration"
+        message = ("ダッシュ記号(—、―、──など)が検出されました。補足や余韻のための装飾であれば、読点や助詞、括弧でつなぐか、"
+                   "文を分けてください。ただし、小説や随筆で書き手が文体として使っている場合や、引用は残してかまいません。")
+    return {"rule": rule, "line": line_no, "severity": "warn", "message": message, "snippet": snippet}
+
+
+_DASH_FINDING_DEFAULT = _dash_finding
+_DASH_RUN_DEFAULT = _DASH_RUN
 
 # 中黒(・)による日本語の並列。「作成・推敲」のような列挙を拾う。
 # セグメントは同一文字種のランに限る。混在させると「ウォルト・ディズニーの作品」で
@@ -444,6 +562,28 @@ def _has_negative_parallelism(text: str) -> bool:
                 return True
         offset = position + len(literal)
 
+# 否定を重ねてから言い切る型(「車でも、家でもない。有頂天だ。」「これは努力じゃない、仕組みです。」)
+# 二度否定してから言い切る文が続く形だけを見る(「何でもない」「とんでもない」、接続詞の「それでも、」は除く)。
+_NOT_IDIOM = r"(?<!何)(?<!なん)(?<!まんざら)(?<!とん)"
+_NEGATION_CONCLUSION_END = r"(?:[うくぐすつぬぶむるいだた]|だけ)(?:よね|よ|ね)?"
+_NEGATION_NEGATIVE_END = (
+    r"(?:[な無]い|[な無]かった|ません(?:でした)?)"
+    r"(?:(?:の|ん)(?:だ|です|だった|でした|である|であった)|です|でした|でしょう|だろう|であろう)?(?:よね|よ|ね)?"
+)
+_NEGATION_EXTRA = re.compile(
+    r"(?:[^。、]{1,15}(?:では|じゃ)ない。[^。]{0,15}|[^。、]{1,15}(?<!それ)(?<!今)(?<!いつ)(?<!誰)(?<!何)でも、[^。、]{1,15})"
+    + _NOT_IDIOM + r"でもない。"
+    + r"(?![^。！？!?]{0,40}" + _NEGATION_NEGATIVE_END + r"[。！!])"
+    + r"[^。！？!?]{1,40}" + _NEGATION_CONCLUSION_END + r"[。！!]")
+# 「これは努力じゃない、仕組みです。」(文ごとに見る)
+_NEGATION_JANAI = re.compile(
+    r"^(?:(?:でも|しかし|つまり|ただ|ただし|けれども?|けど|だが|それでも|だから)、)?"
+    r"(?![い良]いじゃない、|すごいじゃない、|凄いじゃない、)"
+    r"[^。、]{1,15}じゃない、[^。]{1,30}(?:です|だ)(?:よ|ね|よね)?[。！!]?$"
+)
+# 否定のあとに「でもある」と続ける文(「AではなくBでもある」)は、元の言い方のまま残す
+_NEGATION_ALSO = re.compile(r"ではなく、?[^。]{1,40}?(?<!どこに)(?<!誰に)(?<!だれに)(?<!何)(?<!なん)(?<!いつ)でも(ある|あります|あった|ありました)")
+
 # 名詞の過剰連結(サ変名詞の数珠つなぎ)。助詞「の」で 3 つ以上の名詞が
 # 連結している断片を拾い、サ変名詞・抽象名詞の個数で絞り込む。
 # セグメントは純粋な名詞句に限るため、格助詞や接続助詞(は・が・を・も・と)を
@@ -606,6 +746,48 @@ def _image_only_row(analysis, row, visible):
             and destinations.get(image_end + 1) == end)
 
 
+_IMAGE_ONLY_ROW_DEFAULT = _image_only_row
+
+
+def _extra_negation_line_numbers(analysis):
+    """段落内のソフト改行をまたぐ否定の言い切り構文を、ブロックをまたがずに拾う"""
+    hit_lines = set()
+
+    def scan(parts):
+        if not parts:
+            return
+        joined = "".join(visible for _, visible in parts)
+        if "でもない。" not in joined:
+            return
+        offsets = []
+        total = 0
+        for _, visible in parts:
+            offsets.append(total)
+            total += len(visible)
+        for match in _NEGATION_EXTRA.finditer(joined):
+            index = bisect_right(offsets, match.start()) - 1
+            hit_lines.add(parts[index][0])
+
+    for block in analysis["blocks"]:
+        if block["kind"] != "paragraph":
+            continue
+        parts = []
+        for row in block["lines"]:
+            visible = _prose_visible_text(analysis, row["line"])
+            if (row["quote_depth"]
+                    or ((_image_only_row is not _IMAGE_ONLY_ROW_DEFAULT
+                         or not visible.strip() or row["raw"].lstrip().startswith("[!["))
+                        and _image_only_row(analysis, row, visible))):
+                scan(parts)
+                parts = []
+                continue
+            visible = visible.replace("__", "").replace("*", "").strip()
+            if visible:
+                parts.append((row["line"], visible))
+        scan(parts)
+    return hit_lines
+
+
 def _metrics_from_analysis(analysis):
     """語彙・文末検査と同じ不透明領域の境界で構造メトリクスを算出する"""
     plain_rows = []
@@ -646,6 +828,7 @@ def lint_text(text: str) -> Dict[str, Any]:
     """文章全体を総合検査する"""
     findings = []
     analysis = analyze_markdown(text)
+    extra_negation_lines = _extra_negation_line_numbers(analysis)
     metrics = _metrics_from_analysis(analysis)
     sentence_records = _plain_sentence_records(analysis)
     sentences = [(line, visible) for line, visible, _, _ in sentence_records]
@@ -663,6 +846,11 @@ def lint_text(text: str) -> Dict[str, Any]:
         slop_words, slop_patterns, metaphor_patterns, filler_patterns, info_sentence_patterns = narrowed
     previous_sentence = ""
     bold_label_lines = []
+    negation_lines = []
+    dash_count = 0
+    # 文書にダッシュが一つもなければ行ごとのダッシュ検査を丸ごと省く
+    dash_possible = (_dash_finding is not _DASH_FINDING_DEFAULT or _DASH_RUN is not _DASH_RUN_DEFAULT
+                     or any(char in text for char in DASH_CHARS))
 
     # 1. メトリクス異常の検査(地の文が十分ある場合に適用)
     #    本スキルが許容する記法(定義語の太字、定義列挙の箇条書き)でも
@@ -751,7 +939,8 @@ def lint_text(text: str) -> Dict[str, Any]:
 
         # 「もちろん、」短答の文脈判定用に、直前の地の文を追跡する
         sentence_before_line = previous_sentence
-        previous_sentence = re.sub(r"\*\*|\*|__", "", mention_free)
+        plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
+        previous_sentence = plain_text
 
         # 一文一行(本スキルの整形規範)。引用・表は対象外
         if not row["quote_depth"] and kind not in ("quote", "table"):
@@ -797,6 +986,13 @@ def lint_text(text: str) -> Dict[str, Any]:
             previous_sentence = ""
             continue
 
+        # ダッシュ記号の検査(3ルール。区間・出典・引用・図罫線はマスクし、1文書3件まで)
+        if dash_possible:
+            dash = _dash_finding(plain_text, line_no, stripped)
+            if dash and dash_count < DASH_FINDING_LIMIT:
+                findings.append(dash)
+                dash_count += 1
+
         # 見出し行は補足カッコとダッシュのみ検査し、本文の語彙・構文検査はスキップ
         if kind == "heading":
             if _SUMMARY_HEADING.match(stripped) and metrics["char_count"] < 2000:
@@ -815,30 +1011,11 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "message": "見出しに情報量の増えない補足カッコが含まれています。平文で簡潔に記述してください。",
                     "snippet": line.strip()
                 })
-            if DASH_PATTERN.search(mention_free):
-                findings.append({
-                    "rule": "dash_prohibited",
-                    "line": line_no,
-                    "severity": "warn",
-                    "message": "見出しにダッシュ・罫線記号(—、―、——、─)が含まれています。単一の自然な句に書き直してください。",
-                    "snippet": line.strip()
-                })
             continue
 
-        plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
         if _BOLD_LABEL_ITEM.match(line):
             bold_label_lines.append(line_no)
         line_sentences = [clean for part in _LINE_SENTENCE_BREAK.split(plain_text) if (clean := part.strip())]
-
-        # ダッシュ記号検知(本スキルの整形規範)
-        if DASH_PATTERN.search(mention_free):
-            findings.append({
-                "rule": "dash_prohibited",
-                "line": line_no,
-                "severity": "warn",
-                "message": "ダッシュ・罫線記号(—、―、——、─)が検出されました。挿入は括弧へ、言い換えは句点や読点へ書き直してください。",
-                "snippet": line.strip()
-            })
 
         # 文末コロン(全角「:」または半角「:」)検知。
         # 行末のコロンがコード・URL 等の不透明領域の内側にある場合は除く
@@ -950,12 +1127,24 @@ def lint_text(text: str) -> Dict[str, Any]:
             })
 
         # ネガティブパラレリズム
-        if _has_negative_parallelism(plain_text):
+        if "ではなく" in plain_text and plain_text.count("ではなく") == len(_NEGATION_ALSO.findall(plain_text)):
+            negation_message = None
+        elif _has_negative_parallelism(plain_text) and "ではなく" in plain_text:
+            negation_message = "「A ではなく B」構文が検出されました。誤解を解くために残す場合は否定の根拠を一文添え、それ以外は肯定文で直接書けないか検討してください。"
+        elif (line_no in extra_negation_lines
+              or ("でもない。" in plain_text and _NEGATION_EXTRA.search(plain_text))
+              or ("じゃない、" in plain_text
+                  and any(_NEGATION_JANAI.match(sentence) for sentence in line_sentences))):
+            negation_message = "否定を重ねてから言い切る構文(「AでもBでもない。Cだ。」「Aじゃない、Bです。」)が検出されました。否定している内容を誰も主張していないなら、言い切る文だけにしてください。読み手の思い込みを正す否定なら、一つの文にまとめて残してください。直前で挙げた二つ(問いなど)を両方とも打ち消すだけなら、「どちらでもない。」(敬体なら「どちらでもありません。」)と短く受けてもかまいません。打ち消すほかに、問いにない強めの語や限定、なぜ違うかの説明を含む否定は短くしないでください。"
+        else:
+            negation_message = None
+        if negation_message:
+            negation_lines.append(line_no)
             findings.append({
                 "rule": "negative_parallelism",
                 "line": line_no,
                 "severity": "info",
-                "message": "「A ではなく B」構文が検出されました。誤解を解くために残す場合は否定の根拠を一文添え、それ以外は肯定文で直接書けないか検討してください。",
+                "message": negation_message,
                 "snippet": line.strip()
             })
 
@@ -975,6 +1164,14 @@ def lint_text(text: str) -> Dict[str, Any]:
                 break
 
     # 文書全体の型
+    if len(negation_lines) >= 3:
+        findings.append({
+            "rule": "negative_parallelism_density",
+            "line": negation_lines[2],
+            "severity": "info",
+            "message": f"否定の対比(「A ではなく B」など)が文書内に{len(negation_lines)}か所あります。1か所ずつの役割を確かめ、言い切れば足りる箇所だけを肯定文にしてください。",
+            "snippet": f"行: {', '.join(str(n) for n in negation_lines[:5])}"
+        })
     if len(bold_label_lines) >= 3:
         findings.append({
             "rule": "bold_label_list",

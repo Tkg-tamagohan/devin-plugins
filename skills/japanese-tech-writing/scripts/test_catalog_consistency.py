@@ -36,12 +36,20 @@ import unittest
 from pathlib import Path
 
 from slop_lint import (
-    DASH_PATTERN,
     FILLER_PATTERNS,
+    INFO_SENTENCE_PATTERNS,
     METAPHOR_VERB_PATTERNS,
     NEGATIVE_PARALLELISM_PATTERN,
     SLOP_WORD_PATTERNS,
     SLOP_WORDS,
+    _BOLD_LABEL_ITEM,
+    _DASH_RUN,
+    _FRAGMENT_RUN,
+    _NEGATION_EXTRA,
+    _NEGATION_JANAI,
+    _SHORT_MOCHIRON,
+    _SUMMARY_HEADING,
+    _dash_finding,
 )
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "references" / "slop-catalog.md"
@@ -54,7 +62,10 @@ BOLD_PATTERN = re.compile(r"\*\*([^*]+)\*\*")
 DETECTION_PATTERNS = (
     [p for p, _ in METAPHOR_VERB_PATTERNS + FILLER_PATTERNS]
     + [p for _, p in SLOP_WORD_PATTERNS]
-    + [NEGATIVE_PARALLELISM_PATTERN, DASH_PATTERN]
+    + [p for p, _, _ in INFO_SENTENCE_PATTERNS]
+    + [NEGATIVE_PARALLELISM_PATTERN, _NEGATION_EXTRA, _NEGATION_JANAI,
+       _SHORT_MOCHIRON, _FRAGMENT_RUN, _BOLD_LABEL_ITEM, _SUMMARY_HEADING,
+       _DASH_RUN]
 )
 
 # 免除マニフェスト: カタログの表現で機械検出できないものとその理由。
@@ -248,9 +259,27 @@ class TestLintCoverage(unittest.TestCase):
 
     def test_cat_08_対比構文とダッシュのパターンも用例を検出する(self):
         usages = covered_expressions()
-        checks = [
-            (NEGATIVE_PARALLELISM_PATTERN, "対比構文「ではなく」"),
-            (DASH_PATTERN, "ダッシュ囲みの挿入"),
+        failures = []
+        if not any(NEGATIVE_PARALLELISM_PATTERN.search(u) for u in usages):
+            failures.append("対比構文「ではなく」")
+        # DASH_PATTERN 廃止に伴い、3ルール化した _dash_finding がカタログの
+        # 用例へ指摘を返すことを確かめる
+        if not any(_dash_finding(u, 1, u) for u in usages):
+            failures.append("ダッシュ3ルール(挿入・列挙閉じ・装飾)")
+        self.assertEqual(failures, [])
+
+    def test_cat_09_info系の文型パターンも用例を検出する(self):
+        # Phase 2-3 で加えた info 系の型。カタログのセルに現れる用例を
+        # いずれかのパターンが拾うことを確認する
+        usages = covered_expressions()
+        checks = [(re.compile(p), rule) for p, rule, _ in INFO_SENTENCE_PATTERNS]
+        checks += [
+            (_SHORT_MOCHIRON, "もちろん短答"),
+            (_FRAGMENT_RUN, "断片連続"),
+            (_BOLD_LABEL_ITEM, "太字ラベル箇条書き"),
+            (_SUMMARY_HEADING, "まとめ/おわりに見出し"),
+            (_NEGATION_EXTRA, "否定を重ねて言い切る構文"),
+            (_NEGATION_JANAI, "じゃない、〜です構文"),
         ]
         failures = []
         for pattern, desc in checks:

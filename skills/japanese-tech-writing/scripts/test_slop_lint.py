@@ -4,7 +4,8 @@
 ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
 NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
 NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準入出力の UTF-8 化、
-V2=v1.1.1 Phase 2 の検出強化(語彙パターン、フィラー文単位化、info 文型、絞り込み)。
+V2=v1.1.1 Phase 2 の検出強化(語彙パターン、フィラー文単位化、info 文型、絞り込み)、
+V3=v1.1.1 Phase 3 のダッシュ3ルール化と否定構文強化。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -416,17 +417,18 @@ class TestOneSentencePerLine(unittest.TestCase):
 
 
 class TestHeadingDecoration(unittest.TestCase):
-    """見出しの罫線(U+2500)の検出。整形規範「見出しに区切り線で二要素を詰め込まない」に対応"""
+    """見出しの罫線(U+2500)の検出。整形規範「見出しに区切り線で二要素を詰め込まない」に対応。
+    ダッシュ3ルール化に伴い、単独の罫線は dash_decoration として出る"""
 
     def test_head_01_見出しの罫線は検出する(self):
         self.assertIn(
-            "dash_prohibited",
+            "dash_decoration",
             rules_of("# 種別─主題"),
         )
 
     def test_head_02_本文の罫線も検出する(self):
         self.assertIn(
-            "dash_prohibited",
+            "dash_decoration",
             rules_of("種別─主題のように並べない。"),
         )
 
@@ -714,6 +716,56 @@ class TestV111Phase2(unittest.TestCase):
             [(f["rule"], f["line"], f["severity"]) for f in expected],
             [(f["rule"], f["line"], f["severity"]) for f in actual],
         )
+
+
+class TestV111Phase3(unittest.TestCase):
+    """v1.1.1 Phase 3: ダッシュ3ルール化と否定構文強化(上流 test_v111_* 系の移植)"""
+
+    def test_v3_01_装飾ダッシュはdash_decorationを出す(self):
+        self.assertIn("dash_decoration", rules_of("これは大切な話 — 本当です。"))
+
+    def test_v3_02_ダッシュ挟みの挿入はdash_insertionを出す(self):
+        self.assertIn("dash_insertion", rules_of("今日——正確には昨日——連絡しました。"))
+
+    def test_v3_03_読点並べのダッシュ閉じはdash_list_endingを出す(self):
+        self.assertIn("dash_list_ending", rules_of("速さ、軽さ、静けさ──。"))
+
+    def test_v3_04_区間ダッシュは検出しない(self):
+        self.assertNotIn("dash_decoration", rules_of("新宿—大阪間を移動します。"))
+        self.assertNotIn("dash_insertion", rules_of("新宿—大阪間を移動します。"))
+
+    def test_v3_05_出典行と図罫線は検出しない(self):
+        self.assertEqual([], rules_of("— 著者: 山田太郎"))
+        self.assertEqual([], rules_of("├── src\n│   └── main.py"))
+
+    def test_v3_06_引用内のダッシュは検出しない(self):
+        self.assertEqual([], rules_of("「速さ——軽さ」を例として挙げます。"))
+
+    def test_v3_07_ダッシュ指摘は1文書3件まで(self):
+        text = "A — 話。\nB — 話。\nC — 話。\nD — 話。\n"
+        count = sum(1 for f in lint_text(text)["findings"] if f["rule"].startswith("dash_"))
+        self.assertEqual(count, 3)
+
+    def test_v3_08_二度否定して言い切る構文を検出する(self):
+        self.assertIn("negative_parallelism", rules_of("車でも、家でもない。有頂天だった。"))
+
+    def test_v3_09_段落内のソフト改行をまたぐ否定構文を検出する(self):
+        self.assertIn("negative_parallelism", rules_of("努力ではない。\n才能でもない。\n仕組みだ。"))
+
+    def test_v3_10_じゃないと言い切る構文を検出する(self):
+        self.assertIn("negative_parallelism", rules_of("これは努力じゃない、仕組みです。"))
+
+    def test_v3_11_でもあるで終わる対比は検出しない(self):
+        self.assertNotIn("negative_parallelism", rules_of("彼は敵ではなく、味方でもある。"))
+
+    def test_v3_12_慣用句や問いへの応答は検出しない(self):
+        text = "何でもない。とんでもない。\nいいじゃない、これは君の成果だ。"
+        self.assertNotIn("negative_parallelism", rules_of(text))
+        self.assertNotIn("negative_parallelism", rules_of("簡単ではない。不可能でもない。"))
+
+    def test_v3_13_否定の多発はdensityを出す(self):
+        text = "AではなくBです。\n\nCではなくDです。\n\nEではなくFです。"
+        self.assertIn("negative_parallelism_density", rules_of(text))
 
 
 class TestStdioEncoding(unittest.TestCase):
