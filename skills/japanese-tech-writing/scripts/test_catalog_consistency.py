@@ -77,15 +77,21 @@ EXEMPTIONS = {
     "*point to / suggest*": "「指している」「示唆している」は正当な説明表現と機械的に識別できないため参照に留める",
     "*load-bearing*": "「耐力のある」「構造を支える」は正当な物理・構造の記述と機械的に識別できないため参照に留める",
     "*delve into*": "「深掘りする」は SKILL.md の LLM 節が扱う空虚な動詞だがリントの機械パターンにはなく、参照に留める",
+    # 節 1
+    "逃がす": "字義どおりの用法(熱を逃がす等)と区別できないため機械検出の対象外とし、推敲時の参照に留める",
     # 節 3: 急増比喩・評価名詞は文脈依存の一般用語が大半
     "事故": _CONTEXT_DEPENDENT, "混ざる": _CONTEXT_DEPENDENT, "落とし穴": _CONTEXT_DEPENDENT,
     "破綻": _CONTEXT_DEPENDENT, "実害": _CONTEXT_DEPENDENT, "素通り": _CONTEXT_DEPENDENT,
     "実測": _CONTEXT_DEPENDENT, "疑う": _CONTEXT_DEPENDENT, "照合": _CONTEXT_DEPENDENT,
     "突き合わせる": _CONTEXT_DEPENDENT, "断定": _CONTEXT_DEPENDENT, "取り違える": _CONTEXT_DEPENDENT,
+    "見落とす": _CONTEXT_DEPENDENT,
     "入口": _CONTEXT_DEPENDENT, "道具": _CONTEXT_DEPENDENT, "核心": _CONTEXT_DEPENDENT,
     "主役": _CONTEXT_DEPENDENT, "構図": _CONTEXT_DEPENDENT, "線引き": _CONTEXT_DEPENDENT,
+    "導線": _CONTEXT_DEPENDENT, "出口": _CONTEXT_DEPENDENT, "〜のカギ": _CONTEXT_DEPENDENT,
+    "〜への近道": _CONTEXT_DEPENDENT, "〜の第一歩": _CONTEXT_DEPENDENT, "両輪": _CONTEXT_DEPENDENT,
     "既定": _CONTEXT_DEPENDENT, "別物": _CONTEXT_DEPENDENT, "定番": _CONTEXT_DEPENDENT,
     "要点": _CONTEXT_DEPENDENT, "定石": _CONTEXT_DEPENDENT, "桁違い": _CONTEXT_DEPENDENT,
+    "勝ち筋": _CONTEXT_DEPENDENT, "刺さる": _CONTEXT_DEPENDENT, "〜で決まる": _CONTEXT_DEPENDENT,
     # 節 4: 壮大化熟語のうち SLOP_WORDS にないもの
     "真実": _CONTEXT_DEPENDENT, "結末": _CONTEXT_DEPENDENT, "運命": _CONTEXT_DEPENDENT,
     "究極": _CONTEXT_DEPENDENT, "虚像": _CONTEXT_DEPENDENT, "残酷": _CONTEXT_DEPENDENT,
@@ -96,11 +102,31 @@ EXEMPTIONS = {
     "契約": "取引・合意としての正当な用法と区別できないため機械検出の対象外とし、推敲時の参照に留める",
     "仕組み": "実際の処理を説明する正当な用法が多く機械検出すると誤検出が多いため、推敲時の参照に留める",
     "境界": "数学・区域の境界や境界値など正当な用法が多く機械検出すると誤検出が多いため、推敲時の参照に留める",
+    "粒度": "データの粒度など正当な技術用法と区別できないため機械検出の対象外とし、推敲時の参照に留める",
+    "余白": "紙面の余白のような字義どおりの用法と区別できないため機械検出の対象外とし、推敲時の参照に留める",
+    "軸": "座標軸など正当な技術用法と区別できないため機械検出の対象外とし、推敲時の参照に留める",
+    "言語化": _CONTEXT_DEPENDENT,
+    "落とし込む": _CONTEXT_DEPENDENT, "紐解く": _CONTEXT_DEPENDENT, "これは強い": _CONTEXT_DEPENDENT,
     # 節 6: フィラー定型句のうち未実装のもの
     "ここで注目すべきは": _FILLER_UNIMPLEMENTED,
+    "原因はシンプルです": _FILLER_UNIMPLEMENTED,
+    "ここまで見てきました": _FILLER_UNIMPLEMENTED,
+    "驚くべきことに": _FILLER_UNIMPLEMENTED,
+    "結局のところ": _FILLER_UNIMPLEMENTED, "要するに": _FILLER_UNIMPLEMENTED,
+    "おっしゃる通りです": _FILLER_UNIMPLEMENTED,
+    "ご希望があれば〜できます": "「ご希望があれば」検出は後続の「次に」「続けて」等を要求するため、この形は参照に留める",
+    "〜を知りたいですか？": _FILLER_UNIMPLEMENTED,
     "〜というわけです": _FILLER_UNIMPLEMENTED,
     "〜と言えるでしょう": _FILLER_UNIMPLEMENTED,
     "ぜひ試してみてください": "リントの定型クロージング検出は「ぜひ(参考|試し|活用)(に)して…ください」の形を要求するため、素の「ぜひ試して」形は参照に留める",
+    # 節 7: 硬い漢語と決まり文句はいずれも文脈依存の一般用語
+    "活用する": _CONTEXT_DEPENDENT, "実施する": _CONTEXT_DEPENDENT,
+    "多角的": _CONTEXT_DEPENDENT, "包括的": _CONTEXT_DEPENDENT,
+    "〜を実現することができます": _CONTEXT_DEPENDENT,
+    "シームレス": _CONTEXT_DEPENDENT, "シナジー": _CONTEXT_DEPENDENT,
+    "価値を最大化": _CONTEXT_DEPENDENT, "次のレベルへ": _CONTEXT_DEPENDENT,
+    "圧倒的": _CONTEXT_DEPENDENT, "爆速": _CONTEXT_DEPENDENT,
+    "革命的": _CONTEXT_DEPENDENT, "徹底解説": _CONTEXT_DEPENDENT,
 }
 
 
@@ -196,7 +222,7 @@ class TestCatalogCoverage(unittest.TestCase):
 
     def test_cat_03_節3以降の語彙は検出される(self):
         # 語彙の入った列は節ごとに決まっている(機械読み取りの契約参照)
-        vocab_col = {3: 1, 4: 0, 5: 1, 6: 1}
+        vocab_col = {3: 1, 4: 0, 5: 1, 6: 1, 7: 1}
         failures = []
         for sec in catalog_sections():
             if sec["num"] < 3:
