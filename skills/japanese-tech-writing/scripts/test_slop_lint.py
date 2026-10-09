@@ -3,12 +3,22 @@
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
 ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
 NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
-NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行。
+NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準入出力の UTF-8 化。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
 
+import contextlib
+import io
+import json
+import os
+import runpy
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from slop_lint import lint_text
 from markdown_bold import bold_problems
@@ -590,6 +600,132 @@ class TestExistingRules(unittest.TestCase):
             [],
             rules_of("この README で確認する。"),
         )
+
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+LINT = SCRIPTS_DIR / "slop_lint.py"
+
+# 上流 test_stdio_encoding.py の SAMPLE と同じ文。検出件数は移植版の
+# ルール組でも 3 件になる(上流の meta_intro の代わりに one_sentence_per_line が立つ)
+SAMPLE = "本記事では、手触りのある設計の本質に迫ります。いかがでしたでしょうか。\n"
+
+
+def run_cp932(args, stdin=None):
+    """標準入出力が cp932 の環境を PYTHONIOENCODING で作って子プロセスを実行する"""
+    env = dict(os.environ, PYTHONIOENCODING="cp932:surrogateescape")
+    env.pop("PYTHONUTF8", None)
+    return subprocess.run(
+        [sys.executable, "-B"] + [str(a) for a in args],
+        input=stdin,
+        capture_output=True,
+        env=env,
+        timeout=10,
+    )
+
+
+_KEEP = object()
+
+
+def run_in_process(script, args, stdin=_KEEP, stdout=_KEEP):
+    """標準入出力を TextIOWrapper 以外(StringIO や None)に差し替えて、スクリプトを __main__ として実行する"""
+    patches = [mock.patch.object(sys, "argv", [str(script)] + [str(a) for a in args])]
+    if stdin is not _KEEP:
+        patches.append(mock.patch.object(sys, "stdin", stdin))
+    # スクリプトがテストランナー自身の stdout を reconfigure しないよう差し替える
+    patches.append(mock.patch.object(sys, "stdout", io.StringIO() if stdout is _KEEP else stdout))
+    with contextlib.ExitStack() as stack:
+        for patch in patches:
+            stack.enter_context(patch)
+        try:
+            runpy.run_path(str(script), run_name="__main__")
+        except SystemExit as stop:
+            return stop.code or 0
+    return 0
+
+
+class TestStdioEncoding(unittest.TestCase):
+    """標準入出力が cp932 の環境でも UTF-8 で読み書きする(上流 test_stdio_encoding.py の移植)"""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory(prefix="slop-stdio-")
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+
+    def write(self, name, text):
+        path = self.root / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def assert_ascii_json(self, process):
+        self.assertEqual(process.returncode, 0, process.stderr.decode("utf-8", "replace"))
+        self.assertTrue(process.stdout.isascii(), "--json の出力は ASCII だけにする")
+        return json.loads(process.stdout.decode("ascii"))
+
+    def test_stdio_01_utf8の標準入力はファイル指定と同じ結果になる(self):
+        path = self.write("sample.md", SAMPLE)
+        from_file = self.assert_ascii_json(run_cp932([LINT, path, "--json"]))
+        from_stdin = self.assert_ascii_json(run_cp932([LINT, "--json"], SAMPLE.encode("utf-8")))
+        self.assertEqual(from_stdin, from_file)
+        self.assertEqual(from_stdin["metrics"]["char_count"], 35)
+        self.assertEqual(len(from_stdin["findings"]), 3)
+
+    def test_stdio_02_utf8の標準入力でもstrictの終了コード1になる(self):
+        process = run_cp932([LINT, "--strict"], SAMPLE.encode("utf-8"))
+        self.assertEqual(process.returncode, 1, process.stderr.decode("utf-8", "replace"))
+        self.assertEqual(process.stderr, b"")
+
+    def test_stdio_03_utf8でない標準入力は終了コード2で拒否する(self):
+        process = run_cp932([LINT, "--json"], SAMPLE.encode("cp932"))
+        self.assertEqual(process.returncode, 2)
+        self.assertEqual(process.stdout, b"")
+        self.assertIn(b"Error reading stdin", process.stderr)
+
+    def test_stdio_04_絵文字を含む指摘をcp932で落ちずに報告する(self):
+        path = self.write("emoji.md", "🚀 設定ファイルを更新しました。\n")
+        report = run_cp932([LINT, path])
+        self.assertEqual(report.returncode, 0, report.stderr.decode("utf-8", "replace"))
+        self.assertIn("🚀", report.stdout.decode("utf-8"))
+        result = self.assert_ascii_json(run_cp932([LINT, path, "--json"]))
+        self.assertIn("🚀", result["findings"][0]["message"])
+
+    def test_stdio_05_ダッシュを含む抜粋をcp932で落ちずに報告する(self):
+        path = self.write("dash.md", "手触りのある設計です — いかがでしたでしょうか。\n")
+        report = run_cp932([LINT, path])
+        self.assertEqual(report.returncode, 0, report.stderr.decode("utf-8", "replace"))
+        self.assertIn("—", report.stdout.decode("utf-8"))
+        result = self.assert_ascii_json(run_cp932([LINT, path, "--json"]))
+        snippets = [f["snippet"] for f in result["findings"]]
+        self.assertTrue(any("—" in s for s in snippets))
+
+
+class TestStreamsWithoutReconfigure(unittest.TestCase):
+    """reconfigure() を持たない標準入出力(IDLE やプロセス内実行)でも動く"""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory(prefix="slop-stdio-")
+        self.addCleanup(folder.cleanup)
+        self.path = Path(folder.name) / "sample.md"
+        self.path.write_text(SAMPLE, encoding="utf-8")
+
+    def test_stdio_06_StringIOの標準出力へjsonを書き込める(self):
+        out = io.StringIO()
+        self.assertEqual(run_in_process(LINT, [self.path, "--json"], stdout=out), 0)
+        self.assertEqual(len(json.loads(out.getvalue())["findings"]), 3)
+
+    def test_stdio_07_StringIOの標準入力を読める(self):
+        out = io.StringIO()
+        self.assertEqual(run_in_process(LINT, ["--json"], stdin=io.StringIO(SAMPLE), stdout=out), 0)
+        self.assertEqual(json.loads(out.getvalue())["metrics"]["char_count"], 35)
+
+    def test_stdio_08_標準出力がNoneでも実行できる(self):
+        self.assertEqual(run_in_process(LINT, [self.path], stdout=None), 0)
+
+    def test_stdio_09_標準入力がNoneなら終了コード2で拒否する(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = run_in_process(LINT, ["--json"], stdin=None, stdout=io.StringIO())
+        self.assertEqual(code, 2)
+        self.assertIn("Error reading stdin", stderr.getvalue())
 
 
 if __name__ == "__main__":
