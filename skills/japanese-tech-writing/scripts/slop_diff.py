@@ -127,11 +127,17 @@ EVAL_END = r"(?:重要|最重要|大切|大事|不可欠|肝心|肝要|欠かせ
 def bare_end(s: str) -> str:
     """文末の判定に使う形。太字や記号、文末のかっこ書き（「〜」の例など）を外す"""
     t = re.sub(r"\*\*|`", "", s).strip().rstrip("。．.！!？?").strip()
-    prev = None
-    while prev != t:
-        prev = t
-        t = re.sub(r"[（(][^（）()]*[）)]$", "", t).strip()
-    return re.sub(r"[」』）)]+$", "", t)
+    end = len(t)
+    while end and t[end - 1] in "）)":
+        start = end - 2
+        while start >= 0 and t[start] not in "（）()":
+            start -= 1
+        if start < 0 or t[start] not in "（(":
+            break
+        end = start
+        while end and t[end - 1].isspace():
+            end -= 1
+    return t[:end].rstrip("」』）)")
 
 
 def register(s: str) -> str:
@@ -438,7 +444,14 @@ def report(d: dict) -> str:
     return "\n".join(lines) if lines else "（候補なし）"
 
 
+def read_text(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     stance = None
     for a in sys.argv[1:]:
@@ -446,7 +459,7 @@ if __name__ == "__main__":
             stance = STANCES.get(a.split("=", 1)[1])
     if "--endings" in sys.argv and args:
         # 1つのファイルの文末だけを見る（マークダウンのコードブロックや表の区切りは飛ばす）
-        t = open(args[0], encoding="utf-8").read()
+        t = read_text(args[0])
         rows, flags = stance_flags(t, stance, markdown=True)
         from collections import Counter
         c = Counter(r["kind"] for r in rows if r["where"] != "表")
@@ -464,7 +477,7 @@ if __name__ == "__main__":
         print("使い方: python3 slop_diff.py 元の文.txt 書き直した文.txt [--stance=勧め|決まり|説明] [--json]")
         print("　　　  python3 slop_diff.py --endings ファイル [--stance=勧め|決まり|説明]")
         sys.exit(1)
-    o = open(args[0], encoding="utf-8").read()
-    r = open(args[1], encoding="utf-8").read()
+    o = read_text(args[0])
+    r = read_text(args[1])
     d = diff(o, r, stance)
-    print(json.dumps(d, ensure_ascii=False, indent=1) if "--json" in sys.argv else report(d))
+    print(json.dumps(d, ensure_ascii=True, indent=1) if "--json" in sys.argv else report(d))
