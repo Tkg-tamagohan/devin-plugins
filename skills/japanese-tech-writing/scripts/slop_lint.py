@@ -486,26 +486,6 @@ _FRAGMENT_RUN = re.compile(r"(?:^|(?<=[。！？]))(?:[^。！？、\s「」『�
 # 引用の区切り。「」とリンクは中身を伏せて断片化を防ぐための置換対象
 _QUOTED_SEGMENT = re.compile(r"「[^「」]*」|『[^『』]*』|\[[^\[\]]*\]")
 
-
-def _mask_quoted_segments(text):
-    """対応の取れた引用とリンクを、ネストを含めて一回の走査と累積和で伏せる"""
-    closing = {"「": "」", "『": "』", "[": "]"}
-    stacks = {closer: [] for closer in closing.values()}
-    changes = [0] * (len(text) + 1)
-    for index, char in enumerate(text):
-        if char in closing:
-            stacks[closing[char]].append(index)
-        elif char in stacks and stacks[char]:
-            start = stacks[char].pop()
-            changes[start] += 1
-            changes[index + 1] -= 1
-    depth = 0
-    result = []
-    for index, char in enumerate(text):
-        depth += changes[index]
-        result.append(" " if depth else char)
-    return "".join(result)
-
 # 1行の文区切り(文末記号の直後)
 _LINE_SENTENCE_BREAK = re.compile(r"(?<=[。！？!?])")
 
