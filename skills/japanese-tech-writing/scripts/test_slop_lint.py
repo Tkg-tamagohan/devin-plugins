@@ -739,6 +739,23 @@ class TestV111Phase2(unittest.TestCase):
         self.assertIn("short_summary_heading",
                       rules_of("確認する内容を説明します。\n\n## まとめ ##"))
 
+    def test_v2_17_行またぎの引用内の短文は断片に数えない(self):
+        # レビュー指摘: 行ごとの伏せ字では行をまたぐ「」が残り、
+        # 引用内の短文だけで fragment_run が出ていた
+        self.assertNotIn("fragment_run",
+                         rules_of("手順は「速い。\n軽い。\n安い。」と説明されている。"))
+        self.assertNotIn("fragment_run",
+                         rules_of("手順は「速い。軽い。安い。」と説明されている。"))
+        self.assertIn("fragment_run", rules_of("速い。\n軽い。\n安い。"))
+
+    def test_v2_18_まとめハッシュ連打はまとめ見出しにしない(self):
+        # レビュー指摘: 末尾「#」に空白を要求していなかったため
+        # 「まとめ###」を見出しと誤認していた
+        self.assertNotIn("short_summary_heading",
+                         rules_of("確認する内容を説明します。\n\n## まとめ###"))
+        self.assertNotIn("short_summary_heading",
+                         rules_of("確認する内容を説明します。\n\nまとめ###"))
+
 
 class TestV111Phase3(unittest.TestCase):
     """v1.1.1 Phase 3: ダッシュ3ルール化と否定構文強化(上流 test_v111_* 系の移植)"""
