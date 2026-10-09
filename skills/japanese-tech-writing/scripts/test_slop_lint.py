@@ -652,6 +652,8 @@ class TestV111Phase2(unittest.TestCase):
     def test_v2_01_ゲートは外来語末尾を避けレビューゲートを検出する(self):
         self.assertIn("slop_vocabulary", rules_of("このレビューゲートを通過する必要があります。"))
         self.assertNotIn("slop_vocabulary", rules_of("目的地までナビゲートします。"))
+        # カタログで字義どおりの用法として保持する品質ゲートは検出しない
+        self.assertNotIn("slop_vocabulary", rules_of("品質ゲートを設定します。"))
 
     def test_v2_02_閉包と台帳は定義済み用語を免除する(self):
         self.assertNotIn("slop_vocabulary", rules_of("推移閉包と閉包演算を計算します。"))
