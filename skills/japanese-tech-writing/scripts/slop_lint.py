@@ -40,6 +40,7 @@ import sys
 import re
 import argparse
 import json
+from bisect import bisect_right
 from itertools import chain, compress
 from operator import is_
 from typing import List, Dict, Any, Tuple, Optional
@@ -170,7 +171,7 @@ FILLER_PATTERNS = [
     (r"いかがでした(でしょうか|か)?[？?。]?$", "定型クロージング「いかがでしたでしょうか」"),
     (r"ぜひ(参考|試し|活用)(に)?して(みて)?ください[！!。]?", "定型クロージング「ぜひ〜してみてください」"),
     (r"参考に(なれ|な)ば幸い|お役に立て(れ)?ば幸い|ぜひご(活用|参考に)ください|まずは小さく(始め|はじめ)(?:ましょう|てみましょう|てください|てみてください|てみませんか|て(?:みて)?はいかが(?:ですか|でしょうか)|る(?:ことが(?:大切|大事|重要)|のがおすすめ)です)[。！？!?]?$", "定型クロージング「参考になれば幸いです」など"),
-    (r"〜に他なりません", "過剰な自己ラベリング「〜に他なりません」"),
+    (r"に他なりません", "過剰な自己ラベリング「〜に他なりません」"),
     (r"^ご質問ありがとうございます", "チャット応答の名残「ご質問ありがとうございます」"),
     (r"見ていきましょう[。！!]?$|深掘りしていきます", "定型導入「それでは見ていきましょう」など"),
     (r"^(必要なら|ご希望があれば|よろしければ)、?(次に|続けて|この後(?!の))[^。！？!?]*(?:ます|ましょう)(?:か|よ|ね|よね)?(?:（[^。！？!?（）]*）)?[。！？!?]?$", "チャット応答の名残「必要なら次に〜します」"),
@@ -224,7 +225,7 @@ _PATTERN_LITERAL_HINTS = {
     r"いかがでした(でしょうか|か)?[？?。]?$": ("いかがでした",),
     r"ぜひ(参考|試し|活用)(に)?して(みて)?ください[！!。]?": ("ぜひ",),
     r"参考に(なれ|な)ば幸い|お役に立て(れ)?ば幸い|ぜひご(活用|参考に)ください|まずは小さく(始め|はじめ)(?:ましょう|てみましょう|てください|てみてください|てみませんか|て(?:みて)?はいかが(?:ですか|でしょうか)|る(?:ことが(?:大切|大事|重要)|のがおすすめ)です)[。！？!?]?$": ("ば幸い", "ぜひご", "まずは小さく"),
-    r"〜に他なりません": ("〜に他なりません",),
+    r"に他なりません": ("に他なりません",),
     r"^ご質問ありがとうございます": ("ご質問ありがとうございます",),
     r"見ていきましょう[。！!]?$|深掘りしていきます": ("見ていきましょう", "深掘りしていきます"),
     r"^(必要なら|ご希望があれば|よろしければ)、?(次に|続けて|この後(?!の))[^。！？!?]*(?:ます|ましょう)(?:か|よ|ね|よね)?(?:（[^。！？!?（）]*）)?[。！？!?]?$": ("必要なら", "ご希望があれば", "よろしければ"),
@@ -410,7 +411,9 @@ def _ends_with_question(sentence):
 # 「- **特徴**: 説明」のように、太字の見出し語とコロンで始まる箇条書き
 # 「- **特徴：** 説明」(コロンが太字の内側)や番号付きリストも同じ型として数える。
 _BOLD_LABEL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\*\*[^*]+?(?:\*\*\s*[:：]|[:：]\s*\*\*)")
-_SUMMARY_HEADING = re.compile(r"^#{1,6}\s*(まとめ|おわりに)\s*$")
+# ATX(「## まとめ」「## まとめ ##」)と setext(タイトル行だけが heading に
+# 分類される)の両形式を拾うため、# は任意扱いにする
+_SUMMARY_HEADING = re.compile(r"^(?:#{1,6}\s*)?(まとめ|おわりに)\s*#*\s*$")
 
 # ネガティブパラレリズム(A ではなく B)
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
@@ -606,6 +609,47 @@ def _image_only_row(analysis, row, visible):
             and destinations.get(image_end + 1) == end)
 
 
+def _paragraph_prose_parts(analysis):
+    """段落ブロックの地の文行を(行番号, 可視文字列)の連続区間へ分ける。
+    引用・画像だけの行と段落の境界で区切り、ブロックをまたがない"""
+    for block in analysis["blocks"]:
+        if block["kind"] != "paragraph":
+            continue
+        parts = []
+        for row in block["lines"]:
+            visible = _prose_visible_text(analysis, row["line"])
+            if row["quote_depth"] or _image_only_row(analysis, row, visible):
+                if parts:
+                    yield parts
+                    parts = []
+                continue
+            visible = visible.replace("__", "").replace("*", "").strip()
+            if visible:
+                parts.append((row["line"], visible))
+        if parts:
+            yield parts
+
+
+def _fragment_run_line_numbers(analysis):
+    """段落内の隣接する地の文をつないで短文連打を拾う。
+    一文一行の規範では断片は行をまたぐため、行ごとの判定では拾えない"""
+    hit_lines = set()
+    for parts in _paragraph_prose_parts(analysis):
+        masked = [(n, _QUOTED_SEGMENT.sub("「」", v)) for n, v in parts]
+        joined = "".join(v for _, v in masked)
+        if joined.count("。") + joined.count("！") < 3:
+            continue
+        offsets = []
+        total = 0
+        for _, v in masked:
+            offsets.append(total)
+            total += len(v)
+        for match in _FRAGMENT_RUN.finditer(joined):
+            index = bisect_right(offsets, match.start()) - 1
+            hit_lines.add(masked[index][0])
+    return hit_lines
+
+
 def _metrics_from_analysis(analysis):
     """語彙・文末検査と同じ不透明領域の境界で構造メトリクスを算出する"""
     plain_rows = []
@@ -647,6 +691,7 @@ def lint_text(text: str) -> Dict[str, Any]:
     findings = []
     analysis = analyze_markdown(text)
     metrics = _metrics_from_analysis(analysis)
+    fragment_run_lines = _fragment_run_line_numbers(analysis)
     sentence_records = _plain_sentence_records(analysis)
     sentences = [(line, visible) for line, visible, _, _ in sentence_records]
     source_sentences = [(line, source) for line, _, source, _ in sentence_records]
@@ -938,9 +983,9 @@ def lint_text(text: str) -> Dict[str, Any]:
             })
             break
 
-        # 引用は中身を伏せた「」に置き換え、短い文の数に入れない(「1位は「田中」。」を断片にしない)
-        if (plain_text.count("。") + plain_text.count("！") >= 3
-                and _FRAGMENT_RUN.search(_QUOTED_SEGMENT.sub("「」", plain_text))):
+        # 段落単位で集計済みの短文連打。引用は中身を伏せた「」に置き換えて
+        # 短い文の数に入れない(「1位は「田中」。」を断片にしない)
+        if line_no in fragment_run_lines:
             findings.append({
                 "rule": "fragment_run",
                 "line": line_no,

@@ -715,6 +715,26 @@ class TestV111Phase2(unittest.TestCase):
             [(f["rule"], f["line"], f["severity"]) for f in actual],
         )
 
+    def test_v2_14_波線なしの他なりませんも検出する(self):
+        # レビュー指摘: パターンが波線の直前に限られ「要点に他なりません」を
+        # 見逃していた。定型句そのものを検出する
+        self.assertIn("meta_filler", rules_of("この事実は要点に他なりません。"))
+        self.assertIn("meta_filler", rules_of("この事実は〜に他なりません。"))
+
+    def test_v2_15_短文連打は段落内の行をまたいで検出する(self):
+        # レビュー指摘: 一文一行の規範では断片は行をまたぐため、
+        # 行ごとの句点数では判定に到達しなかった
+        self.assertIn("fragment_run", rules_of("速い。\n軽い。\n安い。"))
+        self.assertNotIn("fragment_run", rules_of("速い。\n軽い。\n\n安い。"))
+
+    def test_v2_16_まとめ見出しはsetextと閉じATXも検出する(self):
+        # レビュー指摘: 「## まとめ」形式だけに一致し、setext や
+        # 「## まとめ ##」を見逃していた
+        self.assertIn("short_summary_heading",
+                      rules_of("確認する内容を説明します。\n\nまとめ\n======"))
+        self.assertIn("short_summary_heading",
+                      rules_of("確認する内容を説明します。\n\n## まとめ ##"))
+
 
 class TestStdioEncoding(unittest.TestCase):
     """標準入出力が cp932 の環境でも UTF-8 で読み書きする(上流 test_stdio_encoding.py の移植)"""
