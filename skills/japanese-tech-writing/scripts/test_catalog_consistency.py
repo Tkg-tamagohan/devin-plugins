@@ -40,6 +40,7 @@ from slop_lint import (
     FILLER_PATTERNS,
     METAPHOR_VERB_PATTERNS,
     NEGATIVE_PARALLELISM_PATTERN,
+    SLOP_WORD_PATTERNS,
     SLOP_WORDS,
 )
 
@@ -50,9 +51,11 @@ BACKQUOTE_PATTERN = re.compile(r"`([^`]+)`")
 BOLD_PATTERN = re.compile(r"\*\*([^*]+)\*\*")
 
 # 用例を検出する側のパターン一式
-DETECTION_PATTERNS = [
-    p for p, _ in METAPHOR_VERB_PATTERNS + FILLER_PATTERNS
-] + [NEGATIVE_PARALLELISM_PATTERN, DASH_PATTERN]
+DETECTION_PATTERNS = (
+    [p for p, _ in METAPHOR_VERB_PATTERNS + FILLER_PATTERNS]
+    + [p for _, p in SLOP_WORD_PATTERNS]
+    + [NEGATIVE_PARALLELISM_PATTERN, DASH_PATTERN]
+)
 
 # 免除マニフェスト: カタログの表現で機械検出できないものとその理由。
 # キーはカタログ中の対象語・節2 では英語の原表現のセル文字列。値は免除の根拠で空文字は不可。
@@ -86,8 +89,6 @@ EXEMPTIONS = {
     "ここで注目すべきは": _FILLER_UNIMPLEMENTED,
     "〜というわけです": _FILLER_UNIMPLEMENTED,
     "〜と言えるでしょう": _FILLER_UNIMPLEMENTED,
-    "面白いのはここです": _FILLER_UNIMPLEMENTED,
-    "〜の参考になれば幸いです": _FILLER_UNIMPLEMENTED,
     "ぜひ試してみてください": "リントの定型クロージング検出は「ぜひ(参考|試し|活用)(に)して…ください」の形を要求するため、素の「ぜひ試して」形は参照に留める",
 }
 

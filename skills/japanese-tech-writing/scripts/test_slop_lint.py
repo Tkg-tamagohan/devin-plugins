@@ -3,7 +3,8 @@
 テストケースの ID 採番と報告は rule `test-conventions` に従う。
 ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末連続、BASE=既存ルールの維持、
 NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
-NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準入出力の UTF-8 化。
+NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準入出力の UTF-8 化、
+V2=v1.1.1 Phase 2 の検出強化(語彙パターン、フィラー文単位化、info 文型、絞り込み)。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -605,8 +606,8 @@ class TestExistingRules(unittest.TestCase):
 SCRIPTS_DIR = Path(__file__).resolve().parent
 LINT = SCRIPTS_DIR / "slop_lint.py"
 
-# 上流 test_stdio_encoding.py の SAMPLE と同じ文。検出件数は移植版の
-# ルール組でも 3 件になる(上流の meta_intro の代わりに one_sentence_per_line が立つ)
+# 上流 test_stdio_encoding.py の SAMPLE と同じ文。Phase 2 で meta_intro が
+# 加わったため検出は 4 件(one_sentence_per_line, meta_intro, slop_vocabulary, meta_filler)
 SAMPLE = "本記事では、手触りのある設計の本質に迫ります。いかがでしたでしょうか。\n"
 
 
@@ -643,6 +644,115 @@ def run_in_process(script, args, stdin=_KEEP, stdout=_KEEP):
     return 0
 
 
+class TestV111Phase2(unittest.TestCase):
+    """v1.1.1 Phase 2: 形判定語彙、フィラー文単位化、info 文型、リテラル絞り込み"""
+
+    def test_v2_01_ゲートは外来語末尾を避けレビューゲートを検出する(self):
+        self.assertIn("slop_vocabulary", rules_of("このレビューゲートを通過する必要があります。"))
+        self.assertNotIn("slop_vocabulary", rules_of("目的地までナビゲートします。"))
+
+    def test_v2_02_閉包と台帳は定義済み用語を免除する(self):
+        self.assertNotIn("slop_vocabulary", rules_of("推移閉包と閉包演算を計算します。"))
+        self.assertNotIn("slop_vocabulary", rules_of("会計の台帳を更新します。"))
+        self.assertIn("slop_vocabulary", rules_of("すべての判断をこの台帳に記録します。"))
+
+    def test_v2_03_比喩のOS命名を検出する(self):
+        self.assertIn("slop_vocabulary", rules_of("意思決定OSとして動作します。"))
+        self.assertNotIn("slop_vocabulary", rules_of("対応OS は Windows と Linux です。"))
+
+    def test_v2_04_本質を突くを検出する(self):
+        self.assertIn("slop_vocabulary", rules_of("この設計は本質を突いています。"))
+
+    def test_v2_05_拡充フィラーを検出する(self):
+        self.assertIn("meta_filler", rules_of("本音を言うと、この設計は複雑です。"))
+        self.assertIn("meta_filler", rules_of("ポイントは、速度だけです。"))
+        self.assertIn("meta_filler", rules_of("ご質問ありがとうございます。確認します。"))
+        self.assertIn("meta_filler", rules_of("必要なら次に説明します。"))
+        self.assertIn("meta_filler", rules_of("それでは見ていきましょう。"))
+
+    def test_v2_06_フィラーは文単位で行途中の文頭にも反応する(self):
+        # 行単位から文単位への変更。二文目の文頭フィラーも検出する
+        self.assertIn("meta_filler", rules_of("確認します。重要なのは、速度です。"))
+
+    def test_v2_07_info文型を検出する(self):
+        self.assertIn("meta_intro", rules_of("本記事では、構成を解説します。"))
+        self.assertIn("summary_restatement", rules_of("まとめると、速度が重要です。"))
+        self.assertIn("summary_restatement", rules_of("総じて、速度が重要です。"))
+        self.assertIn("count_declaration", rules_of("ポイントは3つです。"))
+
+    def test_v2_08_もちろん短答を検出し問いへの応答は免除する(self):
+        self.assertIn("short_mochiron", rules_of("もちろん、失敗もする。"))
+        self.assertNotIn("short_mochiron", rules_of("試してもいいですか。\nもちろん、大丈夫です。"))
+        self.assertNotIn("short_mochiron", rules_of("もちろん、構いません。"))
+
+    def test_v2_09_評価語だけの短文連続を検出する(self):
+        self.assertIn("fragment_run", rules_of("速い。軽い。安い。"))
+        self.assertNotIn("fragment_run", rules_of("速い。軽い。"))
+
+    def test_v2_10_太字ラベル箇条書きは3行以上で検出する(self):
+        three = "- **特徴**: 説明文です。\n- **長所**: 説明文です。\n- **短所**: 説明文です。"
+        self.assertIn("bold_label_list", rules_of(three))
+        two = "- **特徴**: 説明文です。\n- **長所**: 説明文です。"
+        self.assertNotIn("bold_label_list", rules_of(two))
+
+    def test_v2_11_短文書のまとめ見出しを検出する(self):
+        self.assertIn("short_summary_heading", rules_of("確認する内容を説明します。\n\n## まとめ"))
+        self.assertIn("short_summary_heading", rules_of("確認する内容を説明します。\n\n## おわりに"))
+
+    def test_v2_12_info検出はseverityがinfoになる(self):
+        findings = lint_text("本記事では、構成を解説します。")["findings"]
+        self.assertTrue(all(f["severity"] == "info" for f in findings))
+
+    def test_v2_13_絞り込みなしでも検出結果が同じ(self):
+        # _narrowed_document_rows が None に倒れても検出結果は変わらない
+        import slop_lint
+        text = "本音を言うと、このレビューゲートは本質を突いています。効く設計です。"
+        expected = lint_text(text)["findings"]
+        with mock.patch.object(slop_lint, "_narrowed_document_rows", return_value=None):
+            actual = lint_text(text)["findings"]
+        self.assertEqual(
+            [(f["rule"], f["line"], f["severity"]) for f in expected],
+            [(f["rule"], f["line"], f["severity"]) for f in actual],
+        )
+
+    def test_v2_14_波線なしの他なりませんも検出する(self):
+        # レビュー指摘: パターンが波線の直前に限られ「要点に他なりません」を
+        # 見逃していた。定型句そのものを検出する
+        self.assertIn("meta_filler", rules_of("この事実は要点に他なりません。"))
+        self.assertIn("meta_filler", rules_of("この事実は〜に他なりません。"))
+
+    def test_v2_15_短文連打は段落内の行をまたいで検出する(self):
+        # レビュー指摘: 一文一行の規範では断片は行をまたぐため、
+        # 行ごとの句点数では判定に到達しなかった
+        self.assertIn("fragment_run", rules_of("速い。\n軽い。\n安い。"))
+        self.assertNotIn("fragment_run", rules_of("速い。\n軽い。\n\n安い。"))
+
+    def test_v2_16_まとめ見出しはsetextと閉じATXも検出する(self):
+        # レビュー指摘: 「## まとめ」形式だけに一致し、setext や
+        # 「## まとめ ##」を見逃していた
+        self.assertIn("short_summary_heading",
+                      rules_of("確認する内容を説明します。\n\nまとめ\n======"))
+        self.assertIn("short_summary_heading",
+                      rules_of("確認する内容を説明します。\n\n## まとめ ##"))
+
+    def test_v2_17_行またぎの引用内の短文は断片に数えない(self):
+        # レビュー指摘: 行ごとの伏せ字では行をまたぐ「」が残り、
+        # 引用内の短文だけで fragment_run が出ていた
+        self.assertNotIn("fragment_run",
+                         rules_of("手順は「速い。\n軽い。\n安い。」と説明されている。"))
+        self.assertNotIn("fragment_run",
+                         rules_of("手順は「速い。軽い。安い。」と説明されている。"))
+        self.assertIn("fragment_run", rules_of("速い。\n軽い。\n安い。"))
+
+    def test_v2_18_まとめハッシュ連打はまとめ見出しにしない(self):
+        # レビュー指摘: 末尾「#」に空白を要求していなかったため
+        # 「まとめ###」を見出しと誤認していた
+        self.assertNotIn("short_summary_heading",
+                         rules_of("確認する内容を説明します。\n\n## まとめ###"))
+        self.assertNotIn("short_summary_heading",
+                         rules_of("確認する内容を説明します。\n\nまとめ###"))
+
+
 class TestStdioEncoding(unittest.TestCase):
     """標準入出力が cp932 の環境でも UTF-8 で読み書きする(上流 test_stdio_encoding.py の移植)"""
 
@@ -667,7 +777,7 @@ class TestStdioEncoding(unittest.TestCase):
         from_stdin = self.assert_ascii_json(run_cp932([LINT, "--json"], SAMPLE.encode("utf-8")))
         self.assertEqual(from_stdin, from_file)
         self.assertEqual(from_stdin["metrics"]["char_count"], 35)
-        self.assertEqual(len(from_stdin["findings"]), 3)
+        self.assertEqual(len(from_stdin["findings"]), 4)
 
     def test_stdio_02_utf8の標準入力でもstrictの終了コード1になる(self):
         process = run_cp932([LINT, "--strict"], SAMPLE.encode("utf-8"))
@@ -710,7 +820,7 @@ class TestStreamsWithoutReconfigure(unittest.TestCase):
     def test_stdio_06_StringIOの標準出力へjsonを書き込める(self):
         out = io.StringIO()
         self.assertEqual(run_in_process(LINT, [self.path, "--json"], stdout=out), 0)
-        self.assertEqual(len(json.loads(out.getvalue())["findings"]), 3)
+        self.assertEqual(len(json.loads(out.getvalue())["findings"]), 4)
 
     def test_stdio_07_StringIOの標準入力を読める(self):
         out = io.StringIO()
