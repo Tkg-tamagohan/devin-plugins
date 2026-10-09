@@ -62,7 +62,7 @@ rules/<name>.md                    # トリガー付きルール(description に
 skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
 skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、生成スクリプト(scripts/new_entry.py)、構造チェック(scripts/check_plugin.py)
 skills/japanese-tech-writing/scripts/    # スロップリンター(slop_lint.py)と回帰テスト
-skills/japanese-tech-writing/references/ # 悪い表現の語彙カタログ(slop-catalog.md)
+skills/japanese-tech-writing/references/ # 悪い表現の語彙カタログ(slop-catalog.md)とリンター運用手順(slop-lint-usage.md)
 skills/repo-drift-audit/child-prompts.md # 監査で子セッションへ渡すプロンプトの定型
 .github/workflows/plugin-checks.yml # リンターの回帰テストと文書リント、構造チェックを実行する CI
 ```

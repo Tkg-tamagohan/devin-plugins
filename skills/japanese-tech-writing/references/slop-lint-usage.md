@@ -5,7 +5,8 @@
 
 ## 一括検査
 
-devin-plugins リポジトリで複数の文書を一括検査するときは、リポジトリ直下の `.sloplintignore` が検査対象の除外を管理する（gitignore 形式のパス一覧で、1 行 1 件で足すか削る）。
+本節の `.sloplintignore` と検査対象の説明は、執筆時点の devin-plugins リポジトリの構成を対象とする。
+複数の文書を一括検査するときは、リポジトリ直下の `.sloplintignore` が検査対象の除外を管理する（gitignore 形式のパス一覧で、1 行 1 件で足すか削る）。
 検査対象は `git ls-files '*.md'` から `.sloplintignore` に一致するものだけを除いた集合であり、`references/slop-catalog.md` は言及自体が規範抵触として検出されるため恒久除外としている。
 次のコマンドは、除外を適用して全対象を検査し、途中の失敗を集計して終了コードを非ゼロにする。
 
