@@ -43,6 +43,9 @@
 ## フェーズ別タスク
 
 各フェーズは独立した PR とする。
+チェック済みの項目は対応するフェーズのブランチで実装と検証が終わったことを示し、マージ済みを意味しない。
+Phase 1 から Phase 5 の変更は PR #42 から #46 の積み上げ PR に含まれ、本書の更新時点ではいずれも未マージである。
+マージは PR 番号順に行う。
 プラグイン中身の修正だけを含む PR はパッチバンプとし、PR 前に `new_entry.py bump` で差分から水準を確定する。
 `new_entry.py` の `version_at_ref` は `git show` にバックスラッシュを含むパスを渡すため Windows では基準 ref の plugin.json を読めず失敗する。
 その場合は `check_plugin.py --version-base` が要求する下限を確認し、手動でバージョンを更新する(Linux や CI 上では `new_entry.py bump` が使える)。
@@ -120,7 +123,7 @@
 
 ## 引き継ぎ手順
 
-- 現在地は本書のチェックリストと、devin-plugins でマージ済みの該当 PR から確認する。
+- 現在地は本書のチェックリストと、devin-plugins の該当 PR(#42 から #46)の状態から確認する。
 - ブランチは `devin/$(date +%s)-yomiyasu-v111-p<N>` とし、フェーズごとに PR を分ける。
 - ローカル検証の一式は `test_slop_lint.py`、`test_catalog_consistency.py`、`test_slop_diff.py`、`test_new_entry.py`、`check_plugin.py`、全 Markdown の一括リント(`--strict`)である。
 - 上流ファイルの差分確認は `git clone` した yomiyasu リポジトリで行う。
