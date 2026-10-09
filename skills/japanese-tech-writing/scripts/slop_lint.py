@@ -111,7 +111,14 @@ _ATTRIBUTION_LABEL = re.compile(r"^(?:出典|引用元|著者|Source|Author)\s*[
 _ATTRIBUTION_BOOK = re.compile(r"^[一-龥々ァ-ヴーA-Za-z .・'’-]+『[^』]+』(?:[ \t　]*(?:（[^）]*）|\([^)]*\)))*[。.]?$")
 _ATTRIBUTION_ENGLISH = re.compile(r"^[A-Z][A-Za-z.'’−-]*(?:[ \t]+[A-Z][A-Za-z.'’−-]*)+,[ \t]+\S")
 # 「人間」「作業時間」「目線」などの普通名詞は、区間を表す接尾辞と取り違えない。
-_NON_ROUTE_ENDINGS = ("人間", "時間", "期間", "空間", "世間", "仲間", "手間", "目線", "視線", "動線", "光線", "伏線", "生命線", "方便", "利便", "不便")
+_NON_ROUTE_ENDINGS = (
+    "人間", "時間", "期間", "空間", "世間", "仲間", "手間", "中間", "瞬間", "隙間",
+    "夜間", "昼間", "週間", "月間", "年間", "民間",
+    "目線", "視線", "動線", "光線", "伏線", "生命線",
+    "直線", "曲線", "点線", "実線", "破線", "罫線", "下線", "上線",
+    "基線", "接線", "垂線", "水平線", "境界線", "配線", "回線", "無線", "有線", "電線",
+    "方便", "利便", "不便", "郵便", "宅配便", "便乗", "便宜", "便益"
+)
 
 
 def _is_dash_attribution(text):
@@ -247,7 +254,7 @@ SLOP_WORDS = [
 SLOP_WORD_PATTERNS = [
     # ナビゲート、デリゲートなど -gate で終わる外来語は、直前のカタカナで除く(レビューゲートなどは拾う)。
     ("ゲート", r"(?:(?<![ァ-ヴー])|(?<=レビュー)|(?<=リリース)|(?<=チェック)|(?<=デプロイ)|(?<=マージ)|(?<=テスト))"
-               r"(?<!搭乗)(?<!改札)ゲート(?!ウ[ェエ]イ|ボール|キーパー)"),
+               r"(?<!搭乗)(?<!改札)(?<!品質)ゲート(?!ウ[ェエ]イ|ボール|キーパー)"),
     # 数学の閉包(推移閉包、閉包演算など)や、会計・行政の台帳は定義どおりの用語として残す。
     ("閉包", r"(?<!推移)(?<!反射)(?<!対称)(?<!凸)(?<!代数)(?<!代数的)閉包(?!演算)"),
     ("台帳", r"(?<!資産)(?<!住民基本)(?<!会計)(?<!会計の)(?<!行政の)(?<!課税)(?<!土地)(?<!家屋)(?<!備品)(?<!登記)台帳"),
@@ -288,7 +295,7 @@ FILLER_PATTERNS = [
     (r"いかがでした(でしょうか|か)?[？?。]?$", "定型クロージング「いかがでしたでしょうか」"),
     (r"ぜひ(参考|試し|活用)(に)?して(みて)?ください[！!。]?", "定型クロージング「ぜひ〜してみてください」"),
     (r"参考に(なれ|な)ば幸い|お役に立て(れ)?ば幸い|ぜひご(活用|参考に)ください|まずは小さく(始め|はじめ)(?:ましょう|てみましょう|てください|てみてください|てみませんか|て(?:みて)?はいかが(?:ですか|でしょうか)|る(?:ことが(?:大切|大事|重要)|のがおすすめ)です)[。！？!?]?$", "定型クロージング「参考になれば幸いです」など"),
-    (r"〜に他なりません", "過剰な自己ラベリング「〜に他なりません」"),
+    (r"に他なりません", "過剰な自己ラベリング「〜に他なりません」"),
     (r"^ご質問ありがとうございます", "チャット応答の名残「ご質問ありがとうございます」"),
     (r"見ていきましょう[。！!]?$|深掘りしていきます", "定型導入「それでは見ていきましょう」など"),
     (r"^(必要なら|ご希望があれば|よろしければ)、?(次に|続けて|この後(?!の))[^。！？!?]*(?:ます|ましょう)(?:か|よ|ね|よね)?(?:（[^。！？!?（）]*）)?[。！？!?]?$", "チャット応答の名残「必要なら次に〜します」"),
@@ -342,14 +349,14 @@ _PATTERN_LITERAL_HINTS = {
     r"いかがでした(でしょうか|か)?[？?。]?$": ("いかがでした",),
     r"ぜひ(参考|試し|活用)(に)?して(みて)?ください[！!。]?": ("ぜひ",),
     r"参考に(なれ|な)ば幸い|お役に立て(れ)?ば幸い|ぜひご(活用|参考に)ください|まずは小さく(始め|はじめ)(?:ましょう|てみましょう|てください|てみてください|てみませんか|て(?:みて)?はいかが(?:ですか|でしょうか)|る(?:ことが(?:大切|大事|重要)|のがおすすめ)です)[。！？!?]?$": ("ば幸い", "ぜひご", "まずは小さく"),
-    r"〜に他なりません": ("〜に他なりません",),
+    r"に他なりません": ("に他なりません",),
     r"^ご質問ありがとうございます": ("ご質問ありがとうございます",),
     r"見ていきましょう[。！!]?$|深掘りしていきます": ("見ていきましょう", "深掘りしていきます"),
     r"^(必要なら|ご希望があれば|よろしければ)、?(次に|続けて|この後(?!の))[^。！？!?]*(?:ます|ましょう)(?:か|よ|ね|よね)?(?:（[^。！？!?（）]*）)?[。！？!?]?$": ("必要なら", "ご希望があれば", "よろしければ"),
     r"^(まとめると|総じて)、": ("まとめると", "総じて"),
     r"^本記事では": ("本記事では",),
     r"(ポイント|理由|観点|コツ|方法)は(3|三|３)つ(です|あります)|以下の(3|三|３)つの(観点|ポイント)": ("3つ", "三つ", "３つ"),
-    r"(?:(?<![ァ-ヴー])|(?<=レビュー)|(?<=リリース)|(?<=チェック)|(?<=デプロイ)|(?<=マージ)|(?<=テスト))(?<!搭乗)(?<!改札)ゲート(?!ウ[ェエ]イ|ボール|キーパー)": ("ゲート",),
+    r"(?:(?<![ァ-ヴー])|(?<=レビュー)|(?<=リリース)|(?<=チェック)|(?<=デプロイ)|(?<=マージ)|(?<=テスト))(?<!搭乗)(?<!改札)(?<!品質)ゲート(?!ウ[ェエ]イ|ボール|キーパー)": ("ゲート",),
     r"(?<!推移)(?<!反射)(?<!対称)(?<!凸)(?<!代数)(?<!代数的)閉包(?!演算)": ("閉包",),
     r"(?<!資産)(?<!住民基本)(?<!会計)(?<!会計の)(?<!行政の)(?<!課税)(?<!土地)(?<!家屋)(?<!備品)(?<!登記)台帳": ("台帳",),
     r"(思考|意思決定|仕事|人生|組織|チーム|学習|経営)の?OS(?![A-Za-z])": ("OS",),
@@ -528,7 +535,9 @@ def _ends_with_question(sentence):
 # 「- **特徴**: 説明」のように、太字の見出し語とコロンで始まる箇条書き
 # 「- **特徴：** 説明」(コロンが太字の内側)や番号付きリストも同じ型として数える。
 _BOLD_LABEL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\*\*[^*]+?(?:\*\*\s*[:：]|[:：]\s*\*\*)")
-_SUMMARY_HEADING = re.compile(r"^#{1,6}\s*(まとめ|おわりに)\s*$")
+# ATX(「## まとめ」「## まとめ ##」)と setext(タイトル行だけが heading に
+# 分類される)の両形式を拾うため、# は任意扱いにする
+_SUMMARY_HEADING = re.compile(r"^(?:#{1,6}\s*)?(まとめ|おわりに)\s*#*\s*$")
 
 # ネガティブパラレリズム(A ではなく B)
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
@@ -746,45 +755,63 @@ def _image_only_row(analysis, row, visible):
             and destinations.get(image_end + 1) == end)
 
 
-_IMAGE_ONLY_ROW_DEFAULT = _image_only_row
-
-
-def _extra_negation_line_numbers(analysis):
-    """段落内のソフト改行をまたぐ否定の言い切り構文を、ブロックをまたがずに拾う"""
-    hit_lines = set()
-
-    def scan(parts):
-        if not parts:
-            return
-        joined = "".join(visible for _, visible in parts)
-        if "でもない。" not in joined:
-            return
-        offsets = []
-        total = 0
-        for _, visible in parts:
-            offsets.append(total)
-            total += len(visible)
-        for match in _NEGATION_EXTRA.finditer(joined):
-            index = bisect_right(offsets, match.start()) - 1
-            hit_lines.add(parts[index][0])
-
+def _paragraph_prose_parts(analysis):
+    """段落ブロックの地の文行を(行番号, 可視文字列)の連続区間へ分ける。
+    引用・画像だけの行と段落の境界で区切り、ブロックをまたがない"""
     for block in analysis["blocks"]:
         if block["kind"] != "paragraph":
             continue
         parts = []
         for row in block["lines"]:
             visible = _prose_visible_text(analysis, row["line"])
-            if (row["quote_depth"]
-                    or ((_image_only_row is not _IMAGE_ONLY_ROW_DEFAULT
-                         or not visible.strip() or row["raw"].lstrip().startswith("[!["))
-                        and _image_only_row(analysis, row, visible))):
-                scan(parts)
-                parts = []
+            if row["quote_depth"] or _image_only_row(analysis, row, visible):
+                if parts:
+                    yield parts
+                    parts = []
                 continue
             visible = visible.replace("__", "").replace("*", "").strip()
             if visible:
                 parts.append((row["line"], visible))
-        scan(parts)
+        if parts:
+            yield parts
+
+
+def _fragment_run_line_numbers(analysis):
+    """段落内の隣接する地の文をつないで短文連打を拾う。
+    一文一行の規範では断片は行をまたぐため、行ごとの判定では拾えない"""
+    hit_lines = set()
+    for parts in _paragraph_prose_parts(analysis):
+        masked = [(n, _QUOTED_SEGMENT.sub("「」", v)) for n, v in parts]
+        joined = "".join(v for _, v in masked)
+        if joined.count("。") + joined.count("！") < 3:
+            continue
+        offsets = []
+        total = 0
+        for _, v in masked:
+            offsets.append(total)
+            total += len(v)
+        for match in _FRAGMENT_RUN.finditer(joined):
+            index = bisect_right(offsets, match.start()) - 1
+            hit_lines.add(masked[index][0])
+    return hit_lines
+
+
+def _extra_negation_line_numbers(analysis):
+    """段落内のソフト改行をまたぐ否定の言い切り構文を、ブロックをまたがずに拾う。
+    行ごとの検査と同じく「」内の言及は伏せる(行またぎの引用も連結後に伏せる)"""
+    hit_lines = set()
+    for parts in _paragraph_prose_parts(analysis):
+        joined = _mask_quoted_segments("".join(v for _, v in parts))
+        if "でもない。" not in joined:
+            continue
+        offsets = []
+        total = 0
+        for _, v in parts:
+            offsets.append(total)
+            total += len(v)
+        for match in _NEGATION_EXTRA.finditer(joined):
+            index = bisect_right(offsets, match.start()) - 1
+            hit_lines.add(parts[index][0])
     return hit_lines
 
 
@@ -830,6 +857,7 @@ def lint_text(text: str) -> Dict[str, Any]:
     analysis = analyze_markdown(text)
     extra_negation_lines = _extra_negation_line_numbers(analysis)
     metrics = _metrics_from_analysis(analysis)
+    fragment_run_lines = _fragment_run_line_numbers(analysis)
     sentence_records = _plain_sentence_records(analysis)
     sentences = [(line, visible) for line, visible, _, _ in sentence_records]
     source_sentences = [(line, source) for line, _, source, _ in sentence_records]
@@ -1115,9 +1143,9 @@ def lint_text(text: str) -> Dict[str, Any]:
             })
             break
 
-        # 引用は中身を伏せた「」に置き換え、短い文の数に入れない(「1位は「田中」。」を断片にしない)
-        if (plain_text.count("。") + plain_text.count("！") >= 3
-                and _FRAGMENT_RUN.search(_QUOTED_SEGMENT.sub("「」", plain_text))):
+        # 段落単位で集計済みの短文連打。引用は中身を伏せた「」に置き換えて
+        # 短い文の数に入れない(「1位は「田中」。」を断片にしない)
+        if line_no in fragment_run_lines:
             findings.append({
                 "rule": "fragment_run",
                 "line": line_no,
@@ -1126,18 +1154,18 @@ def lint_text(text: str) -> Dict[str, Any]:
                 "snippet": stripped
             })
 
-        # ネガティブパラレリズム
-        if "ではなく" in plain_text and plain_text.count("ではなく") == len(_NEGATION_ALSO.findall(plain_text)):
-            negation_message = None
-        elif _has_negative_parallelism(plain_text) and "ではなく" in plain_text:
+        # ネガティブパラレリズム。「A ではなく B でもある」は反語的用法のため
+        # 「ではなく」構文だけを免除し、同行の「でもない」「じゃない」検査は続ける
+        negation_message = None
+        if (_has_negative_parallelism(plain_text) and "ではなく" in plain_text
+                and plain_text.count("ではなく") != len(_NEGATION_ALSO.findall(plain_text))):
             negation_message = "「A ではなく B」構文が検出されました。誤解を解くために残す場合は否定の根拠を一文添え、それ以外は肯定文で直接書けないか検討してください。"
-        elif (line_no in extra_negation_lines
-              or ("でもない。" in plain_text and _NEGATION_EXTRA.search(plain_text))
-              or ("じゃない、" in plain_text
-                  and any(_NEGATION_JANAI.match(sentence) for sentence in line_sentences))):
+        if (negation_message is None
+                and (line_no in extra_negation_lines
+                     or ("でもない。" in plain_text and _NEGATION_EXTRA.search(plain_text))
+                     or ("じゃない、" in plain_text
+                         and any(_NEGATION_JANAI.match(sentence) for sentence in line_sentences)))):
             negation_message = "否定を重ねてから言い切る構文(「AでもBでもない。Cだ。」「Aじゃない、Bです。」)が検出されました。否定している内容を誰も主張していないなら、言い切る文だけにしてください。読み手の思い込みを正す否定なら、一つの文にまとめて残してください。直前で挙げた二つ(問いなど)を両方とも打ち消すだけなら、「どちらでもない。」(敬体なら「どちらでもありません。」)と短く受けてもかまいません。打ち消すほかに、問いにない強めの語や限定、なぜ違うかの説明を含む否定は短くしないでください。"
-        else:
-            negation_message = None
         if negation_message:
             negation_lines.append(line_no)
             findings.append({

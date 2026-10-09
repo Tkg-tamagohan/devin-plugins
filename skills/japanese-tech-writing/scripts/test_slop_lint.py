@@ -652,6 +652,8 @@ class TestV111Phase2(unittest.TestCase):
     def test_v2_01_ゲートは外来語末尾を避けレビューゲートを検出する(self):
         self.assertIn("slop_vocabulary", rules_of("このレビューゲートを通過する必要があります。"))
         self.assertNotIn("slop_vocabulary", rules_of("目的地までナビゲートします。"))
+        # カタログで字義どおりの用法として保持する品質ゲートは検出しない
+        self.assertNotIn("slop_vocabulary", rules_of("品質ゲートを設定します。"))
 
     def test_v2_02_閉包と台帳は定義済み用語を免除する(self):
         self.assertNotIn("slop_vocabulary", rules_of("推移閉包と閉包演算を計算します。"))
@@ -717,6 +719,26 @@ class TestV111Phase2(unittest.TestCase):
             [(f["rule"], f["line"], f["severity"]) for f in actual],
         )
 
+    def test_v2_14_波線なしの他なりませんも検出する(self):
+        # レビュー指摘: パターンが波線の直前に限られ「要点に他なりません」を
+        # 見逃していた。定型句そのものを検出する
+        self.assertIn("meta_filler", rules_of("この事実は要点に他なりません。"))
+        self.assertIn("meta_filler", rules_of("この事実は〜に他なりません。"))
+
+    def test_v2_15_短文連打は段落内の行をまたいで検出する(self):
+        # レビュー指摘: 一文一行の規範では断片は行をまたぐため、
+        # 行ごとの句点数では判定に到達しなかった
+        self.assertIn("fragment_run", rules_of("速い。\n軽い。\n安い。"))
+        self.assertNotIn("fragment_run", rules_of("速い。\n軽い。\n\n安い。"))
+
+    def test_v2_16_まとめ見出しはsetextと閉じATXも検出する(self):
+        # レビュー指摘: 「## まとめ」形式だけに一致し、setext や
+        # 「## まとめ ##」を見逃していた
+        self.assertIn("short_summary_heading",
+                      rules_of("確認する内容を説明します。\n\nまとめ\n======"))
+        self.assertIn("short_summary_heading",
+                      rules_of("確認する内容を説明します。\n\n## まとめ ##"))
+
 
 class TestV111Phase3(unittest.TestCase):
     """v1.1.1 Phase 3: ダッシュ3ルール化と否定構文強化(上流 test_v111_* 系の移植)"""
@@ -766,6 +788,32 @@ class TestV111Phase3(unittest.TestCase):
     def test_v3_13_否定の多発はdensityを出す(self):
         text = "AではなくBです。\n\nCではなくDです。\n\nEではなくFです。"
         self.assertIn("negative_parallelism_density", rules_of(text))
+
+    def test_v3_14_でもある免除は同行の他の否定構文を潰さない(self):
+        # レビュー指摘: 「AではなくBでもある」の免除が elif 連鎖の先頭で
+        # 行全体を抑止し、同行の「でもない」「じゃない」を見逃していた
+        self.assertIn("negative_parallelism",
+                      rules_of("正しいのはAではなくBでもある。Cでも、Dでもない。Eだ。"))
+        self.assertIn("negative_parallelism",
+                      rules_of("正しいのはAではなくBでもある。これは努力じゃない、仕組みです。"))
+        self.assertNotIn("negative_parallelism", rules_of("正しいのはAではなくBでもある。"))
+
+    def test_v3_15_段落走査は行またぎの言及も伏せる(self):
+        # レビュー指摘: 段落連結後の走査が「」内の言及を伏せておらず、
+        # 引用として書いた否定構文の例を誤検出し得た
+        self.assertNotIn("negative_parallelism",
+                         rules_of("規範では「Aでも、\nBでもない。」と書く。実際はCだ。"))
+        self.assertIn("negative_parallelism", rules_of("Aでも、\nBでもない。Cだ。"))
+
+    def test_v3_16_経路マスクは間線便を含む普通名詞を誤認しない(self):
+        # レビュー指摘: 「中間結果」「配線」のような普通名詞まで
+        # 区間接尾辞とみなしてダッシュ指摘を伏せていた
+        self.assertIn("dash_insertion", rules_of("結果—中間結果—を確認する。"))
+        self.assertIn("dash_insertion", rules_of("装置—配線—の確認。"))
+        self.assertIn("dash_insertion", rules_of("明日—郵便—で送る。"))
+        self.assertNotIn("dash_decoration", rules_of("新宿—大阪間を移動します。"))
+        self.assertNotIn("dash_decoration", rules_of("東京—山手線で移動します。"))
+        self.assertNotIn("dash_decoration", rules_of("昼便—夜行便を利用します。"))
 
 
 class TestStdioEncoding(unittest.TestCase):
