@@ -26,6 +26,10 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 - 行ごとの正規表現走査を markdown_visibility.py の構造解析へ移行。
   コード・URL・HTML・参照定義などの不透明領域は可視テキストで
   空白化し、引用・表・HTML ブロックはブロック種別で除外する
+- v1.1.1 追従: SLOP_WORD_PATTERNS(形で確かめる語彙)、フィラーの
+  文単位走査と FILLER_NOTES、INFO_SENTENCE_PATTERNS、もちろん
+  短答・断片連続・太字ラベル列挙・まとめ見出しの info 検出、
+  リテラル事前絞り込み(_narrowed_document_rows)による走査削減
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -36,6 +40,8 @@ import sys
 import re
 import argparse
 import json
+from itertools import chain, compress
+from operator import is_
 from typing import List, Dict, Any, Tuple, Optional
 
 try:
@@ -111,11 +117,24 @@ SLOP_WORDS = [
     # 認知・評価を装う語
     "解像度", "腹落ち", "メンタルモデル", "本質的", "地に足のついた", "等身大",
     # 抽象比喩名詞
-    "営み", "装置", "意思決定OS", "土台", "羅針盤", "起爆剤", "触媒",
+    "営み", "装置", "土台", "羅針盤", "起爆剤", "触媒",
     # 必殺技造語(体験の壮大化)
     "真理", "虚飾", "境地", "美学", "深淵", "冷徹", "禁欲的", "優美", "極致", "宿命",
     # 文脈によるが要点検の語
     "正本",
+]
+
+# 部分一致では別の語を巻き込むため、形で確かめる語(語, パターン)。
+# 「意思決定OS」は語彙リストからこちらの形判定へ移した。
+SLOP_WORD_PATTERNS = [
+    # ナビゲート、デリゲートなど -gate で終わる外来語は、直前のカタカナで除く(レビューゲートなどは拾う)。
+    ("ゲート", r"(?:(?<![ァ-ヴー])|(?<=レビュー)|(?<=リリース)|(?<=チェック)|(?<=デプロイ)|(?<=マージ)|(?<=テスト))"
+               r"(?<!搭乗)(?<!改札)ゲート(?!ウ[ェエ]イ|ボール|キーパー)"),
+    # 数学の閉包(推移閉包、閉包演算など)や、会計・行政の台帳は定義どおりの用語として残す。
+    ("閉包", r"(?<!推移)(?<!反射)(?<!対称)(?<!凸)(?<!代数)(?<!代数的)閉包(?!演算)"),
+    ("台帳", r"(?<!資産)(?<!住民基本)(?<!会計)(?<!会計の)(?<!行政の)(?<!課税)(?<!土地)(?<!家屋)(?<!備品)(?<!登記)台帳"),
+    ("〜のOS", r"(思考|意思決定|仕事|人生|組織|チーム|学習|経営)の?OS(?![A-Za-z])"),
+    ("本質を突く", r"本質を突"),
 ]
 
 # 比喩動詞・AI 偏愛動詞パターン
@@ -139,15 +158,259 @@ METAPHOR_VERB_PATTERNS = [
 ]
 
 # メタフィラー・定型句
+# 文ごとに当てる(^ と $ は文の頭と終わり)。
 FILLER_PATTERNS = [
-    (r"^(まず|ここで)?重要なのは、?", "前置フィラー「重要なのは」"),
-    (r"^結論から言うと、?", "前置フィラー「結論から言うと」"),
+    (r"^(まず|ここで)?(重要|大切|大事)なのは、?", "前置フィラー「重要なのは」"),
+    (r"^結論から(言|い)(う|い|え)|^結論から申し上げ", "前置フィラー「結論から言うと」"),
     (r"^正直に言うと、?", "前置フィラー「正直に言うと」"),
+    (r"^本音を言うと、?", "前置フィラー「本音を言うと」"),
     (r"^避けたいのは、?", "前置フィラー「避けたいのは」"),
+    (r"^ポイントは、", "前置フィラー「ポイントは、」"),
+    (r"見落とされがち|面白いのはここ|まさにそこがポイント", "自己ラベル「見落とされがち」など"),
     (r"いかがでした(でしょうか|か)?[？?。]?$", "定型クロージング「いかがでしたでしょうか」"),
     (r"ぜひ(参考|試し|活用)(に)?して(みて)?ください[！!。]?", "定型クロージング「ぜひ〜してみてください」"),
-    (r"に他なり(ません|ない)", "過剰な自己ラベリング「〜に他ならない」"),
+    (r"参考に(なれ|な)ば幸い|お役に立て(れ)?ば幸い|ぜひご(活用|参考に)ください|まずは小さく(始め|はじめ)(?:ましょう|てみましょう|てください|てみてください|てみませんか|て(?:みて)?はいかが(?:ですか|でしょうか)|る(?:ことが(?:大切|大事|重要)|のがおすすめ)です)[。！？!?]?$", "定型クロージング「参考になれば幸いです」など"),
+    (r"〜に他なりません", "過剰な自己ラベリング「〜に他なりません」"),
+    (r"^ご質問ありがとうございます", "チャット応答の名残「ご質問ありがとうございます」"),
+    (r"見ていきましょう[。！!]?$|深掘りしていきます", "定型導入「それでは見ていきましょう」など"),
+    (r"^(必要なら|ご希望があれば|よろしければ)、?(次に|続けて|この後(?!の))[^。！？!?]*(?:ます|ましょう)(?:か|よ|ね|よね)?(?:（[^。！？!?（）]*）)?[。！？!?]?$", "チャット応答の名残「必要なら次に〜します」"),
 ]
+
+# 規則の説明に添える、残してよい場合(指針の例外に合わせる)
+FILLER_NOTES = {
+    "チャット応答の名残「ご質問ありがとうございます」": "チャットやメールの返信そのものなら残してかまいません。",
+    "チャット応答の名残「必要なら次に〜します」": "書き手が読み手に実際に申し出ている案内なら残してかまいません。",
+    "定型クロージング「参考になれば幸いです」など": "メールや手紙の結びの挨拶や、書き手が実際に勧めている内容なら残してかまいません。",
+    "定型クロージング「いかがでしたでしょうか」": "メールや手紙の結びの挨拶なら残してかまいません。",
+    "定型クロージング「ぜひ〜してみてください」": "書き手が実際に勧めている内容なら残してかまいません。",
+}
+
+# 見直しのきっかけにとどめる文単位の型(info)。(パターン, 規則, 説明)
+INFO_SENTENCE_PATTERNS = [
+    (r"^(まとめると|総じて)、", "summary_restatement",
+     "言い直しの締め(「まとめると」「総じて」)が検出されました。本文で言い終えた内容を繰り返すだけなら削ってください。新しい情報、条件、結論の絞り込みを担う場合や、長い文書や発表で要約の役割を担う場合は残してください。削るときも、その箇所にしかない数値・条件・例外は落とさないでください。"),
+    (r"^本記事では", "meta_intro",
+     "「本記事では」で始まる案内が検出されました。続く本文と同じ内容を予告しているだけなら削り、長い文書の目次的な案内なら残してください。"),
+    (r"(ポイント|理由|観点|コツ|方法)は(3|三|３)つ(です|あります)|以下の(3|三|３)つの(観点|ポイント)", "count_declaration",
+     "数の宣言(「ポイントは3つです」など)が検出されました。宣言した数と続く項目の数が合っていれば、宣言の文を中身とまとめるか削ってください。項目を数に合わせて足したり削ったりしないでください。"),
+]
+
+# これらの正確なパターンに必要なリテラル。置換ルールではなく、変更された
+# パターンやヒントのないカスタムパターンは従来どおり全文を走査する。
+_PATTERN_LITERAL_HINTS = {
+    r"(地味に|よく|じわじわ)効[かきくけいた]": ("効",),
+    r"(データ|仕様|設計|環境|ビルド|システム|秩序)が(静かに)?壊れ": ("壊れ",),
+    r"静かに(壊れ|落ち|失敗|沈黙)": ("静かに",),
+    r"黙って(無視|捨て|スキップ|破棄)": ("黙って",),
+    r"側に倒[すしせ]": ("側に倒",),
+    r"時間[をに]溶か[したす]": ("溶か",),
+    r"(1つずつ|一つずつ)潰[していくす]": ("つずつ潰",),
+    r"(実装|詳細|コード|設計|内部|仕組み|領域|本質)(に|まで|へ)踏み込[んむみま]": ("踏み込",),
+    r"動かしながら引き返[すし]": ("動かしながら引き返",),
+    r"代わりに添え[るた]": ("代わりに添え",),
+    r"(議論|意見|結論|方向性|価格|話題|検討)が[^。！？!?]*?収斂": ("収斂",),
+    r"した瞬間に?": ("した瞬間",),
+    r"(前提|基盤)が崩れ[るた]": ("が崩れ",),
+    r"文化が醸成": ("文化が醸成",),
+    r"プロセスが定着": ("プロセスが定着",),
+    r"事例が残した": ("事例が残した",),
+    r"^(まず|ここで)?(重要|大切|大事)なのは、?": ("なのは",),
+    r"^結論から(言|い)(う|い|え)|^結論から申し上げ": ("結論から",),
+    r"^正直に言うと、?": ("正直に言うと",),
+    r"^本音を言うと、?": ("本音を言うと",),
+    r"^避けたいのは、?": ("避けたいのは",),
+    r"^ポイントは、": ("ポイントは、",),
+    r"見落とされがち|面白いのはここ|まさにそこがポイント": ("見落とされがち", "面白いのはここ", "まさにそこがポイント"),
+    r"いかがでした(でしょうか|か)?[？?。]?$": ("いかがでした",),
+    r"ぜひ(参考|試し|活用)(に)?して(みて)?ください[！!。]?": ("ぜひ",),
+    r"参考に(なれ|な)ば幸い|お役に立て(れ)?ば幸い|ぜひご(活用|参考に)ください|まずは小さく(始め|はじめ)(?:ましょう|てみましょう|てください|てみてください|てみませんか|て(?:みて)?はいかが(?:ですか|でしょうか)|る(?:ことが(?:大切|大事|重要)|のがおすすめ)です)[。！？!?]?$": ("ば幸い", "ぜひご", "まずは小さく"),
+    r"〜に他なりません": ("〜に他なりません",),
+    r"^ご質問ありがとうございます": ("ご質問ありがとうございます",),
+    r"見ていきましょう[。！!]?$|深掘りしていきます": ("見ていきましょう", "深掘りしていきます"),
+    r"^(必要なら|ご希望があれば|よろしければ)、?(次に|続けて|この後(?!の))[^。！？!?]*(?:ます|ましょう)(?:か|よ|ね|よね)?(?:（[^。！？!?（）]*）)?[。！？!?]?$": ("必要なら", "ご希望があれば", "よろしければ"),
+    r"^(まとめると|総じて)、": ("まとめると", "総じて"),
+    r"^本記事では": ("本記事では",),
+    r"(ポイント|理由|観点|コツ|方法)は(3|三|３)つ(です|あります)|以下の(3|三|３)つの(観点|ポイント)": ("3つ", "三つ", "３つ"),
+    r"(?:(?<![ァ-ヴー])|(?<=レビュー)|(?<=リリース)|(?<=チェック)|(?<=デプロイ)|(?<=マージ)|(?<=テスト))(?<!搭乗)(?<!改札)ゲート(?!ウ[ェエ]イ|ボール|キーパー)": ("ゲート",),
+    r"(?<!推移)(?<!反射)(?<!対称)(?<!凸)(?<!代数)(?<!代数的)閉包(?!演算)": ("閉包",),
+    r"(?<!資産)(?<!住民基本)(?<!会計)(?<!会計の)(?<!行政の)(?<!課税)(?<!土地)(?<!家屋)(?<!備品)(?<!登記)台帳": ("台帳",),
+    r"(思考|意思決定|仕事|人生|組織|チーム|学習|経営)の?OS(?![A-Za-z])": ("OS",),
+    r"本質を突": ("本質を突",),
+}
+_ALWAYS_SCAN = object()
+_DOCUMENT_TABLES_CACHE = []
+
+
+def _literal_can_cover(literal, other):
+    return other != literal and any(
+        other[index:].startswith(literal)
+        or (index and literal.startswith(other[index:]))
+        for index in range(len(other))
+    )
+
+
+def _document_tables():
+    """検査用パターン表を一度だけ組み立て、文書内に現れる候補だけへ絞る索引を返す"""
+    tables = (SLOP_WORDS, SLOP_WORD_PATTERNS, METAPHOR_VERB_PATTERNS,
+              FILLER_PATTERNS, INFO_SENTENCE_PATTERNS)
+    if any(type(table) not in (list, tuple) for table in tables):
+        return None
+    if _DOCUMENT_TABLES_CACHE:
+        saved, result, lengths, flat = _DOCUMENT_TABLES_CACHE
+        # キャッシュした要素は不変の素の文字列とタプルのみ。同一性チェックは
+        # 置き換えられた要素の等価・ハッシュフックを呼び出さない
+        if tuple(map(len, tables)) == lengths and all(map(is_, chain.from_iterable(tables), flat)):
+            return result
+    words, *families = tables
+    if not all(type(word) is str for word in words):
+        return None
+    if not all(type(row) is tuple and len(row) == width
+               and all(type(item) is str for item in row)
+               for table, width in zip(families, (2, 2, 2, 3)) for row in table):
+        return None
+    saved = tuple(tuple(table) for table in tables)
+    words, slop, metaphor, filler, info = saved
+    literals = []
+    alternatives = []
+
+    def keyed(rows, sources):
+        keys = []
+        out = []
+        for row, source in zip(rows, sources):
+            required = _PATTERN_LITERAL_HINTS.get(source)
+            out.append((*row, required))
+            if required is None:
+                keys.append(_ALWAYS_SCAN)
+            elif len(required) == 1:
+                keys.append(required[0])
+            else:
+                keys.append(required)
+                alternatives.append(required)
+            literals.extend(required or ())
+        return out, keys
+
+    indexed = (
+        keyed(slop, [pattern for _, pattern in slop]),
+        keyed([(re.compile(pattern), desc) for pattern, desc in metaphor], [pattern for pattern, _ in metaphor]),
+        keyed([(re.compile(pattern), desc) for pattern, desc in filler], [pattern for pattern, _ in filler]),
+        keyed([(re.compile(pattern), rule, message) for pattern, rule, message in info], [pattern for pattern, _, _ in info]),
+    )
+    word_keys = [word if word and len(word) <= 64
+                 and not any(char in "*_" or char.isspace() for char in word)
+                 else _ALWAYS_SCAN for word in words]
+    literals.extend(word for word in word_keys if word is not _ALWAYS_SCAN)
+    literals = list(dict.fromkeys(literals))
+    if len(literals) > 128:
+        return None
+    ordered = sorted(literals, key=len, reverse=True)
+    finder = re.compile("|".join(map(re.escape, ordered))) if ordered else None
+    covered = [(literal, covers) for literal in literals
+               for covers in [frozenset(other for other in literals if _literal_can_cover(literal, other))]
+               if covers]
+    result = finder, covered, alternatives, (list(words), word_keys), indexed, literals
+    _DOCUMENT_TABLES_CACHE[:] = [saved, result, tuple(map(len, saved)), tuple(chain.from_iterable(saved))]
+    return result
+
+
+def _narrowed_document_rows(text):
+    """文書内に現れる語彙・パターンだけを残した検査表を返す。検出結果は変わらない"""
+    tables = _document_tables()
+    if tables is None:
+        return None
+    finder, covered, alternatives, (words, word_keys), families, literals = tables
+    gate = text.replace("*", "").replace("_", "")
+    if finder is None:
+        found = frozenset()
+    elif len(gate) <= 2048:
+        found = frozenset(finder.findall(gate))
+    else:
+        # 高密度の長文で繰り返しヒットのコストを抑える。短文の走査予算を
+        # 使い切ったら、直接の包含確認で同じ集合を完成させる
+        found = set()
+        for index, match in enumerate(finder.finditer(gate)):
+            if index == 8:
+                found = {literal for literal in literals if literal in gate}
+                break
+            found.add(match.group())
+        found = frozenset(found)
+    present = set(found)
+    for literal, covers in covered:
+        if not found.isdisjoint(covers) and literal in gate:
+            present.add(literal)
+    present.add(_ALWAYS_SCAN)
+    for required in alternatives:
+        if not present.isdisjoint(required):
+            present.add(required)
+    contains = present.__contains__
+    return ([list(compress(words, map(contains, word_keys)))]
+            + [list(compress(rows, map(contains, keys))) for rows, keys in families])
+
+
+def _may_match_literals(literals, text):
+    if literals is None:
+        return True
+    for literal in literals:
+        if literal in text:
+            return True
+    return False
+
+
+# 評価の語だけの短い文を3つ以上並べる型(「効く。重い。安い。」)
+_FRAGMENT_RUN = re.compile(r"(?:^|(?<=[。！？]))(?:[^。！？、\s「」『』]{1,4}[。！]){3,}")
+
+# 引用の区切り。「」とリンクは中身を伏せて断片化を防ぐための置換対象
+_QUOTED_SEGMENT = re.compile(r"「[^「」]*」|『[^『』]*』|\[[^\[\]]*\]")
+
+# 1行の文区切り(文末記号の直後)
+_LINE_SENTENCE_BREAK = re.compile(r"(?<=[。！？!?])")
+
+# 文頭の「もちろん、」のあとに数語だけが続いて終わる短い文(「もちろん、失敗もする。」)
+_SHORT_MOCHIRON = re.compile(r"^(もちろん|勿論)、[^。！？!?、「」『』]{1,10}[。！!]$")
+# 問いや依頼への答えの定型(「もちろん、大丈夫です。」)は先回りの認めではない
+_MOCHIRON_ANSWER = re.compile(r"^(もちろん|勿論)、(大丈夫|構いません|かまいません|いいですよ|いいよ|できます|可能です|です|だ)")
+
+_QUESTION_CLOSERS = "」』）)\"'*_"
+_QUESTION_SUFFIXES = ("ですか", "ますか", "ませんか", "でしょうか", "だろうか", "のか", "ないか",
+                      "うか", "くか", "ぐか", "すか", "つか", "ぬか", "ぶか", "むか", "るか", "たか", "いいか", "よいか")
+_WH_QUESTION = re.compile(
+    r"なぜ|どうして(?!も)|どのよう(?:に|な)|いつ(?!でも|も|か(?!ら))|どこ(?!でも|も|か(?!ら))|"
+    r"誰(?!でも|も|か(?!ら))|何(?!でも|も|か(?!ら))|どれ(?!でも|も|か(?!ら))|どの(?![^。！？!?、]{1,12}でも)"
+)
+
+
+def _question_content_end(sentence):
+    end = len(sentence)
+    while end and (sentence[end - 1].isspace() or sentence[end - 1] in _QUESTION_CLOSERS):
+        end -= 1
+    return end
+
+
+def _last_context_sentence(text):
+    end = _question_content_end(text)
+    if not end:
+        return ""
+    start = max(text.rfind(mark, 0, end - 1) for mark in "。！？!?") + 1
+    return text[start:end]
+
+
+def _ends_with_question(sentence):
+    """連続する yes/no 疑問文の判定。かで終わるだけの語を疑問文とみなさない"""
+    end = _question_content_end(sentence)
+    if not end:
+        return False
+    explicit = sentence[end - 1] in "？?"
+    if not explicit and sentence[end - 1] == "。":
+        end -= 1
+    if not explicit and (sentence.endswith("いくつか", 0, end)
+                         or not sentence.endswith(_QUESTION_SUFFIXES, 0, end)):
+        return False
+    return _WH_QUESTION.search(sentence, 0, end) is None
+
+
+# 「- **特徴**: 説明」のように、太字の見出し語とコロンで始まる箇条書き
+# 「- **特徴：** 説明」(コロンが太字の内側)や番号付きリストも同じ型として数える。
+_BOLD_LABEL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\*\*[^*]+?(?:\*\*\s*[:：]|[:：]\s*\*\*)")
+_SUMMARY_HEADING = re.compile(r"^#{1,6}\s*(まとめ|おわりに)\s*$")
 
 # ネガティブパラレリズム(A ではなく B)
 NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。、]+)")
@@ -388,8 +651,18 @@ def lint_text(text: str) -> Dict[str, Any]:
     sentences = [(line, visible) for line, visible, _, _ in sentence_records]
     source_sentences = [(line, source) for line, _, source, _ in sentence_records]
     paragraph_groups = [block_id for _, _, _, block_id in sentence_records]
-    metaphor_patterns = [(re.compile(pattern), desc) for pattern, desc in METAPHOR_VERB_PATTERNS]
-    filler_patterns = [(re.compile(pattern), desc) for pattern, desc in FILLER_PATTERNS]
+    narrowed = _narrowed_document_rows(text)
+    if narrowed is None:
+        # コンパイル済みパターンやジェネレータなど通常と違う設定値では、
+        # 従来どおり行ごとの遅延走査に戻る
+        metaphor_patterns = [(re.compile(pattern), desc, None) for pattern, desc in METAPHOR_VERB_PATTERNS]
+        filler_patterns = [(re.compile(pattern), desc, None) for pattern, desc in FILLER_PATTERNS]
+        info_sentence_patterns = [(re.compile(pattern), rule, message, None)
+                                  for pattern, rule, message in INFO_SENTENCE_PATTERNS]
+    else:
+        slop_words, slop_patterns, metaphor_patterns, filler_patterns, info_sentence_patterns = narrowed
+    previous_sentence = ""
+    bold_label_lines = []
 
     # 1. メトリクス異常の検査(地の文が十分ある場合に適用)
     #    本スキルが許容する記法(定義語の太字、定義列挙の箇条書き)でも
@@ -431,9 +704,13 @@ def lint_text(text: str) -> Dict[str, Any]:
         line_no, line = row["line"], row["raw"]
         kind = row["kind"]
         if kind == "code":
+            previous_sentence = ""
             continue
         stripped = line.strip()
         scan_text = _prose_visible_text(analysis, line_no).strip()
+        # 引用・表・水平線や画像だけの行は文脈を引き継がない
+        if kind in ("table", "thematic_break", "quote") or row["quote_depth"]:
+            previous_sentence = ""
 
         # 中黒による並列(本スキルの整形規範。固有名詞の内部は例外)。
         # 記号だけで判定できる検査はフロントマターを含む全行が対象だが、
@@ -461,6 +738,7 @@ def lint_text(text: str) -> Dict[str, Any]:
                 break
 
         if kind in ("frontmatter", "html_block", "reference_definition"):
+            previous_sentence = ""
             continue
         if not scan_text:
             continue
@@ -470,6 +748,10 @@ def lint_text(text: str) -> Dict[str, Any]:
         # 中黒は各検査パターンを跨げない区切りになる。「X」ではなく「Y」では
         # ではなく が残るので、実際の対比は引き続き検査できる
         mention_free = re.sub(r"「[^」]*」", "・", scan_text)
+
+        # 「もちろん、」短答の文脈判定用に、直前の地の文を追跡する
+        sentence_before_line = previous_sentence
+        previous_sentence = re.sub(r"\*\*|\*|__", "", mention_free)
 
         # 一文一行(本スキルの整形規範)。引用・表は対象外
         if not row["quote_depth"] and kind not in ("quote", "table"):
@@ -512,10 +794,19 @@ def lint_text(text: str) -> Dict[str, Any]:
 
         # 引用ブロックや表行はアンチパターン例示等の可能性が高いため語彙スキャンをスキップ
         if row["quote_depth"] or kind in ("quote", "table"):
+            previous_sentence = ""
             continue
 
         # 見出し行は補足カッコとダッシュのみ検査し、本文の語彙・構文検査はスキップ
         if kind == "heading":
+            if _SUMMARY_HEADING.match(stripped) and metrics["char_count"] < 2000:
+                findings.append({
+                    "rule": "short_summary_heading",
+                    "line": line_no,
+                    "severity": "info",
+                    "message": "短い文書に「まとめ」「おわりに」の見出しがあります。本文の繰り返しになっていないか確かめてください。新しい情報や結論の絞り込み、数値を担う場合は残してください。",
+                    "snippet": stripped
+                })
             if re.search(r"（(素の出力|いわゆる|概要|詳細|感謝と設計への反映)）", scan_text):
                 findings.append({
                     "rule": "redundant_bracket",
@@ -535,6 +826,9 @@ def lint_text(text: str) -> Dict[str, Any]:
             continue
 
         plain_text = re.sub(r"\*\*|\*|__", "", mention_free)
+        if _BOLD_LABEL_ITEM.match(line):
+            bold_label_lines.append(line_no)
+        line_sentences = [clean for part in _LINE_SENTENCE_BREAK.split(plain_text) if (clean := part.strip())]
 
         # ダッシュ記号検知(本スキルの整形規範)
         if DASH_PATTERN.search(mention_free):
@@ -562,22 +856,26 @@ def lint_text(text: str) -> Dict[str, Any]:
                 })
 
         # スロップ語彙
-        for word in SLOP_WORDS:
-            if word in plain_text:
-                findings.append({
-                    "rule": "slop_vocabulary",
-                    "line": line_no,
-                    "severity": "warn",
-                    "message": f"AI 頻出語彙「{word}」が含まれています。文脈上必要のない比喩や大げさな装飾であれば、具体的な客観表現に置き換えてください。",
-                    "snippet": line.strip()
-                })
+        if narrowed is None:
+            slop_hits = [word for word in SLOP_WORDS if word in plain_text]
+            slop_hits += [word for word, pattern in SLOP_WORD_PATTERNS if re.search(pattern, plain_text)]
+        else:
+            slop_hits = [word for word in slop_words if word in plain_text]
+            slop_hits += [word for word, pattern, required in slop_patterns
+                          if _may_match_literals(required, plain_text) and re.search(pattern, plain_text)]
+        for word in slop_hits:
+            findings.append({
+                "rule": "slop_vocabulary",
+                "line": line_no,
+                "severity": "warn",
+                "message": f"AI 頻出語彙「{word}」が含まれています。文脈上必要のない比喩や大げさな装飾であれば、具体的な客観表現に置き換えてください。",
+                "snippet": line.strip()
+            })
 
         # 比喩動詞パターン
         kowareru_span = None
-        for pattern, desc in metaphor_patterns:
-            # 「収斂」の先行確認。文境界またぎ防止ガード [^。！？!?]*? は
-            # マッチしない行で全位置からの再試行を伴うため、対象語がなければ省く
-            if pattern.pattern == r"(議論|意見|結論|方向性|価格|話題|検討)が[^。！？!?]*?収斂" and "収斂" not in plain_text:
+        for pattern, desc, required in metaphor_patterns:
+            if not _may_match_literals(required, plain_text):
                 continue
             if desc == "英語直訳「静かに壊れる (silently fail)」" and kowareru_span:
                 # 「Xが壊れる」と「静かに壊れる」が同一動詞に二重反応することを防止
@@ -607,16 +905,49 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "snippet": line.strip()
                 })
 
-        # フィラーパターン
-        for pattern, desc in filler_patterns:
-            if pattern.search(plain_text):
+        # フィラーパターン(文ごとに見て、同じ型は1行1件)
+        for pattern, desc, required in filler_patterns:
+            if _may_match_literals(required, plain_text) and any(pattern.search(sentence) for sentence in line_sentences):
                 findings.append({
                     "rule": "meta_filler",
                     "line": line_no,
                     "severity": "warn",
-                    "message": f"{desc}が検出されました。前置きや定型文を削り、本題から直接書いてください。",
+                    "message": f"{desc}が検出されました。単なる前置きや不要な飾りであれば削り、本題から書いてください。ただし、「何が大事か」という評価や主張そのものを担っている場合は、述語に移すなどして意味を残してください。" + FILLER_NOTES.get(desc, ""),
                     "snippet": line.strip()
                 })
+
+        # 見直しのきっかけにとどめる文の型
+        for pattern, rule, message, required in info_sentence_patterns:
+            if _may_match_literals(required, plain_text) and any(pattern.search(sentence) for sentence in line_sentences):
+                findings.append({"rule": rule, "line": line_no, "severity": "info", "message": message, "snippet": stripped})
+
+        # 文頭の「もちろん、」に数語だけ続く短い文
+        for index, sentence in enumerate(line_sentences):
+            if ("もちろん、" not in plain_text and "勿論、" not in plain_text):
+                break
+            if not _SHORT_MOCHIRON.match(sentence) or _MOCHIRON_ANSWER.match(sentence):
+                continue
+            if _ends_with_question(line_sentences[index - 1] if index else _last_context_sentence(sentence_before_line)):
+                continue
+            findings.append({
+                "rule": "short_mochiron",
+                "line": line_no,
+                "severity": "info",
+                "message": "文頭の「もちろん、」のあとに数語だけが続く短い文が検出されました。読み手が思いそうなことを先回りして認めているだけなら「もちろん、」を外してください。その含みを「当然、」などの別の語で補ったり、元にない理由や因果を足したりはしないでください。問いや依頼への答え、条件や前提の確認なら残してかまいません。",
+                "snippet": stripped
+            })
+            break
+
+        # 引用は中身を伏せた「」に置き換え、短い文の数に入れない(「1位は「田中」。」を断片にしない)
+        if (plain_text.count("。") + plain_text.count("！") >= 3
+                and _FRAGMENT_RUN.search(_QUOTED_SEGMENT.sub("「」", plain_text))):
+            findings.append({
+                "rule": "fragment_run",
+                "line": line_no,
+                "severity": "info",
+                "message": "評価の語だけの短い文が3つ以上続いています(「効く。重い。安い。」など)。何がどうなのかが前後から分かる場合は、対象と評価を述語までつないでください。分からない場合は主語や理由を作らず、原文を残して書き手に確かめてください。小説の語りや詩など、書き手が意図した表現は残してかまいません。",
+                "snippet": stripped
+            })
 
         # ネガティブパラレリズム
         if _has_negative_parallelism(plain_text):
@@ -642,6 +973,16 @@ def lint_text(text: str) -> Dict[str, Any]:
                     "snippet": line.strip()
                 })
                 break
+
+    # 文書全体の型
+    if len(bold_label_lines) >= 3:
+        findings.append({
+            "rule": "bold_label_list",
+            "line": bold_label_lines[0],
+            "severity": "info",
+            "message": f"太字の見出し語とコロンで始まる箇条書きが{len(bold_label_lines)}行あります。値が日時や場所、担当、数値などの短い事実なら残してください。見出し語が抽象的で、値が一文の説明なら、地の文にするか、太字とコロンを外してください。並列関係が明確で読みやすい箇条書きは箇条書きのまま残し、項目の区別と数・順序は変えないでください。",
+            "snippet": f"行: {', '.join(str(n) for n in bold_label_lines[:5])}"
+        })
 
     # スコア計算(100 点満点からの減点方式: warn=5 点, info=2 点)
     penalty = sum(5 if f["severity"] in ("warn", "error") else 2 for f in findings)

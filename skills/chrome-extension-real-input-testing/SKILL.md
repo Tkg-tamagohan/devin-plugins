@@ -39,9 +39,9 @@ watch を DOM レベルで検証する手順は次のとおり。
 
 `browser_console` や devtools の eval はページの main world で走る一方、content script は isolated world で走る。
 DOM 要素は共有だが JS ラッパーは別物なので、main world で `Object.defineProperty(video, 'paused', ...)` しても拡張側の `video.paused` は実値のままになる。
-`classList.add('ad-showing')` 等の DOM 属性変更は全 world で共有され、クラスベースのゲート検証に使える。
+`classList.add('ad-showing')` 等の DOM 属性変更は全 world で共有され、クラスベースのガード判定に使える。
 一方 `paused`/`duration`/`currentTime` などのプロパティ偽装は届かない。
-これらのゲートは「実状態を作る」(別ページで実再生してから一時停止する等)か、content script 側の world を直接評価できる手段(CDP で isolated world コンテキストを選ぶ等)に任せる。
+これらのガード判定は「実状態を作る」(別ページで実再生してから一時停止する等)か、content script 側の world を直接評価できる手段(CDP で isolated world コンテキストを選ぶ等)に任せる。
 
 ## 修飾キー付きホイールは xdotool で送出する
 
