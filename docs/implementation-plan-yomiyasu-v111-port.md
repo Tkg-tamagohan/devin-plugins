@@ -49,48 +49,72 @@
 
 ### Phase 1: 基盤同期
 
-- [ ] `markdown_visibility.py` を v1.1.1 へ再ベンダリングし、出典ヘッダを維持する。
-- [ ] `slop_diff.py` に `bare_end` の書き直し、stdout の UTF-8 再構成、`read_text` ヘルパを移植する。
-- [ ] `slop_lint.py` に stdin/stdout の UTF-8 再構成と、stdin 読み取り時の UnicodeDecodeError を終了コード 2 で扱う処理を移植する。
-- [ ] `test_slop_lint.py` と `test_slop_diff.py` に上流 `test_stdio_encoding.py` 相当のケースを移植する。
+- [x] `markdown_visibility.py` を v1.1.1 へ再ベンダリングし、出典ヘッダを維持する。
+- [x] `slop_diff.py` に `bare_end` の書き直し、stdout の UTF-8 再構成、`read_text` ヘルパを移植する。
+- [x] `slop_lint.py` に stdin/stdout の UTF-8 再構成と、stdin 読み取り時の UnicodeDecodeError を終了コード 2 で扱う処理を移植する。
+- [x] `test_slop_lint.py` と `test_slop_diff.py` に上流 `test_stdio_encoding.py` 相当のケースを移植する。
 
 受け入れ条件として、既存テストがすべて通り、検出結果に変化がないこととする。
 
 ### Phase 2: 検出強化(語彙パターンとフィラー、info 系、性能機械)
 
-- [ ] `SLOP_WORD_PATTERNS` を導入し、「ゲート」「閉包」「台帳」「〜のOS」「本質を突く」を除外条件つきで検出する。
+- [x] `SLOP_WORD_PATTERNS` を導入し、「ゲート」「閉包」「台帳」「〜のOS」「本質を突く」を除外条件つきで検出する。
   「意思決定OS」は `SLOP_WORDS` からパターンへ移す。
-- [ ] `FILLER_PATTERNS` を上流の追加分で拡充し、残してよい条件を補足する `FILLER_NOTES` を導入する。
-- [ ] info 系の `INFO_SENTENCE_PATTERNS`、`short_mochiron`(問い文脈の免除判定一式を含む)、`fragment_run`、`bold_label_list`、`short_summary_heading` を配線する。
-- [ ] リテラル絞り込み機械(`_PATTERN_LITERAL_HINTS`、`_narrowed_document_rows`、`_may_match_literals`)を配線する。
-- [ ] `test_slop_lint.py` に上流 `test_v111_*` 系と `test_dash_and_vocabulary.py` 相当の検出と非検出のケースを移植する。
+- [x] `FILLER_PATTERNS` を上流の追加分で拡充し、残してよい条件を補足する `FILLER_NOTES` を導入する。
+- [x] info 系の `INFO_SENTENCE_PATTERNS`、`short_mochiron`(問い文脈の免除判定一式を含む)、`fragment_run`、`bold_label_list`、`short_summary_heading` を配線する。
+- [x] リテラル絞り込み機械(`_PATTERN_LITERAL_HINTS`、`_narrowed_document_rows`、`_may_match_literals`)を配線する。
+- [x] `test_slop_lint.py` に上流 `test_v111_*` 系と `test_dash_and_vocabulary.py` 相当の検出と非検出のケースを移植する。
 
 受け入れ条件として、新ルールの検出と非対象例の非検出を示すテストが通り、既存テストがすべて通ることとする。
 
 ### Phase 3: ダッシュ3ルール化と否定構文強化
 
-- [ ] `dash_prohibited` を上流の `_dash_finding` 一式へ置き換え、`dash_list_ending`、`dash_insertion`、`dash_decoration` の3ルールと引用や区間、出典、図罫線のマスク、1文書3件上限を導入する。
-- [ ] `DASH_PATTERN` を廃止し、見出しと本文の双方で同じ `_dash_finding` を使う。
-- [ ] 否定構文として `_extra_negation_line_numbers`、`_NEGATION_EXTRA`、`_NEGATION_JANAI`、`_NEGATION_ALSO` の免除、`negative_parallelism_density` を移植する。
-- [ ] `test_catalog_consistency.py` の機械読み取り契約を更新し、`DASH_PATTERN` 廃止と新テーブル(`SLOP_WORD_PATTERNS`、INFO 系、拡充したフィラー)を方向2の担保へ追加する。
+- [x] `dash_prohibited` を上流の `_dash_finding` 一式へ置き換え、`dash_list_ending`、`dash_insertion`、`dash_decoration` の3ルールと引用や区間、出典、図罫線のマスク、1文書3件上限を導入する。
+- [x] `DASH_PATTERN` を廃止し、見出しと本文の双方で同じ `_dash_finding` を使う。
+- [x] 否定構文として `_extra_negation_line_numbers`、`_NEGATION_EXTRA`、`_NEGATION_JANAI`、`_NEGATION_ALSO` の免除、`negative_parallelism_density` を移植する。
+- [x] `test_catalog_consistency.py` の機械読み取り契約を更新し、`DASH_PATTERN` 廃止と新テーブル(`SLOP_WORD_PATTERNS`、INFO 系、拡充したフィラー)を方向2の担保へ追加する。
 
 受け入れ条件として、上流 `test_v111_dash_regressions.py` と `test_v111_filler_negation_regressions.py` 相当のケースの移植と通過、および全 Markdown 一括リントの通過とする。
 
 ### Phase 4: カタログの部分追従
 
-- [ ] lint 採用分に対応する行として、節 5 に `ゲート` `台帳` `思考のOS`、節 6 に新規フィラーと定型導入、数の宣言、チャット応答の名残、言い直しの締めの行を追加する。
-- [ ] 上流の新行のうち lint 非対応で本スキルの規範と整合する参照行(「逃がす」「粒度」「余白」「軸」「言語化」「落とし込む」「紐解く」「これは強い」など)と、上流節 7「硬い漢語と決まり文句」を検討して採用し、免除が必要な項目は `EXEMPTIONS` に理由つきで登録する。
+- [x] lint 採用分に対応する行として、節 5 に `ゲート` `台帳` `思考のOS`、節 6 に新規フィラーと定型導入、数の宣言、チャット応答の名残、言い直しの締めの行を追加する。
+- [x] 上流の新行のうち lint 非対応で本スキルの規範と整合する参照行(「逃がす」「粒度」「余白」「軸」「言語化」「落とし込む」「紐解く」「これは強い」など)と、上流節 7「硬い漢語と決まり文句」を検討して採用し、免除が必要な項目は `EXEMPTIONS` に理由つきで登録する。
 節 7 を追加する場合は `test_catalog_consistency.py` の節ごとの語彙列辞書(`vocab_col`、現状は節 3 から 6 まで)に第 7 節の抽出規則を追加し、免除方針もあわせて更新しないと整合テストが失敗する。
-- [ ] 見送った検出(「版」「回帰」)に対応する上流の行と、既存行と重複する行は入れない。
+- [x] 見送った検出(「版」「回帰」)に対応する上流の行と、既存行と重複する行は入れない。
 
 受け入れ条件として、`test_catalog_consistency.py` が通ることとする。
 
 ### Phase 5: SKILL.md の制限導入
 
-- [ ] 採用した lint とカタログの変更に対応する主題だけを節ごとに反映する。
+- [x] 採用した lint とカタログの変更に対応する主題だけを節ごとに反映する。
   対象候補は、ダッシュ記号の例外(区間、出典、図罫線)の明確化、否定構文の「でもある」の保持と「どちらでもない」の短い受け、数の宣言と言い直しの締め、文頭の「もちろん、」の短い文、定型導入とチャット応答の名残、出典のない「〜という声」、確認手順の「ゲート」と記録の「台帳」、評価だけの短い文の連打とする。
-- [ ] 「Xとは:Y」見出しと議事録ラベルのコロンは、見出しコロン検査の見送りに伴い対象外とする。
-- [ ] 節ごとの採否を本書に記録する。
+- [x] 「Xとは:Y」見出しと議事録ラベルのコロンは、見出しコロン検査の見送りに伴い対象外とする。
+- [x] 節ごとの採否を本書に記録する。
+
+節ごとの採否の記録は次の通り(PR #46 時点、上流差分は v1.0.8 から v1.1.1 の SKILL.md のもの)。
+
+| 上流の変更 | 採否 | 反映先 |
+|---|---|---|
+| 予告だけの文への数の宣言の追加 | 採用 | 「LLM っぽい表現の禁止」の「予告と総括」 |
+| 言い直しの締め(まとめると、結局のところ、要するに、「まとめ」見出し) | 採用 | 同上(「総じて」「結局のところ」を列挙に追加) |
+| 文頭の「もちろん、」の短い文 | 採用 | 同上 |
+| 定型の案内や結び、チャット応答の名残 | 採用 | 同上 |
+| 「契約」「正本」「ゲート」「台帳」の大げさな呼称 | 採用 | 「LLM っぽい表現の禁止」の「空虚な形容」 |
+| 否定構文の「でもある」の保持と「どちらでもない」の短い受け | 採用 | 「演出の抑制」の対句の項目 |
+| 評価の語だけの短い文の連打 | 採用 | 「演出の抑制」の短い決め台詞の項目 |
+| 罫線文字とダッシュ例外(区間、出典、図罫線、文体ダッシュ)の明確化 | 採用 | 「整形」のダッシュの項目 |
+| 出典のない「〜という声もあります」の扱い | 採用 | 「読者への誠実さ」 |
+| 「uvとは:仕組みと使い方」形の見出し | 不採用 | 「Xとは:Y」見出し検査の見送りに連動 |
+| 擬人化の抽象名詞作用の例(gemini-syntax.md 原則3 参照) | 不採用 | 参照先の gemini-syntax.md を同梱しないため |
+| 専門用語と名称(表やスキーマの名称保持) | 不採用 | 計画の対象候補にない規範追加のため |
+| 文長と読点(平均の目安の明確化と主題の読点の例) | 不採用 | 同上 |
+| 案内用の見出しの全面改訂 | 不採用 | 同上 |
+| 「■」「・」記号見出しの保持 | 不採用 | 同上 |
+| 段落の話題把握への要約と表の区別の追加 | 不採用 | 同上 |
+| 出力欄「残したAIっぽいところ」への「内面の説明」の追加 | 不採用 | 同上 |
+
+制約メモ: SKILL.md は `check_plugin.py` の 200 行上限に達していたため、追記は新しい箇条書きを増やさず既存項目への接続節として折り込み、行数は 200 のまま保った。
 
 受け入れ条件として、全 Markdown の `--strict` 一括リントが通ることとする。
 
