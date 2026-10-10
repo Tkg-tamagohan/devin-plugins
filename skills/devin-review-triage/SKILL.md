@@ -33,3 +33,24 @@ Devin Review が PR に投稿した指摘は、修正するか根拠を説明す
 - 低重大度の nit や大掛かりな対応が要る非クリティカルな指摘は、勝手に大きな変更で応えず、対応要否をユーザーに確認する。
 - 指摘は修正 push のたびに新スレッドや同一スレッドへの再掲(「Edited to」形式)で複数ラウンド追加されうるため、全スレッドを解決した後も、終了判定の前に新着通知を確認する。
 - push 後に Devin Review のチェックが pending のまま残ることがあるが、required でなければ表示ラグなので、マージ可否の判断には使わない。
+
+## gh CLI でのスレッド操作
+
+手順 5 の `git_comment_on_pr`・`resolve_thread_id` は環境依存のツール名である。
+`gh` が使える環境では、スレッドへの返信と解決は GraphQL の `addPullRequestReviewThreadReply` と `resolveReviewThread` が等価の操作になる。
+
+スレッドの列挙と未解決の抽出は次のとおり。
+
+```bash
+gh api graphql -f query='{ repository(owner:"<owner>",name:"<repo>"){ pullRequest(number:<PR>){ reviewThreads(first:50){ nodes{ id isResolved comments(first:1){ nodes{ path line body } } } } } } }' \
+  --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false)]'
+```
+
+返信と解決は次のミューテーションで行う。
+
+```bash
+gh api graphql -f query='mutation { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: "<PRRT_...>", body: "<本文>"}) { comment { id } } }'
+gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<PRRT_...>"}) { thread { isResolved } } }'
+```
+
+本文に日本語などマルチバイトを含むときは `-f` のインライン引数が壊れるため、Python の `subprocess` から `json.dumps` で組み立てて渡す（組み立て方は `windows-cli-pitfalls` を参照）。

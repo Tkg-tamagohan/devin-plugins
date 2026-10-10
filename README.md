@@ -49,6 +49,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `requirements-definition` | 要件定義や仕様確定の進め方 |
 | `user-work-runbook` | ユーザーが手作業で行う運用の手順書作成 |
 | `windows-blueprint` | Windows 向け blueprint の作成とデバッグ |
+| `windows-cli-pitfalls` | Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI 引数を扱うときの罠と回避策 |
 
 ## 構成
 
