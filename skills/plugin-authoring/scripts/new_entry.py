@@ -82,7 +82,9 @@ def write_version(root: Path, version: str) -> None:
 def version_at_ref(root: Path, ref: str) -> Optional[str]:
     """git ref 上の plugin.json の version。取得できなければ None"""
     try:
-        text = git(root, "show", f"{ref}:{PLUGIN_JSON_PATH}")
+        # Windows では str(Path) がバックスラッシュを返し git が
+        # 「ref:path」のパス部を解決できないため posix に固定する
+        text = git(root, "show", f"{ref}:{PLUGIN_JSON_PATH.as_posix()}")
     except subprocess.CalledProcessError:
         return None
     try:
