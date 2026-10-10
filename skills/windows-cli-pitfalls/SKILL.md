@@ -39,7 +39,7 @@ r = subprocess.run(
 print(r.stdout)
 ```
 
-同じ回避策は `gh pr comment`、`gh issue create` の本文など、JSON 以外の `-f` 引数に日本語を渡す場面でも有効である。
+同じ回避策は `gh pr comment` や `gh issue create` の本文引数（`-b`）に日本語を渡す場面でも有効である。
 
 ## バックスラッシュを含む引数
 
