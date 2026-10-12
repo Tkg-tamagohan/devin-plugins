@@ -12,6 +12,8 @@ skills/plugin-authoring/guidelines.md のチェックリストのうち、機械
   description、200 行以内
 - AGENTS.md: ## 節の本文が 5 行以内
 - README.md: 各ルール・スキル名がバッククォートつきで収録一覧に載っている
+- docs/*.md: チェックリストを持つ計画書に `状態:` 行(進行中/完了/中断)がある、
+  「進行中」なのに全項目チェック済みの矛盾がない
 - .devin-plugin/plugin.json: name, version, description を持つ JSON
 - --version-base <ref>: 指定した git ref の plugin.json と version が
   変わっていることを確認(PR でのバージョン更新忘れの検出用)
@@ -182,6 +184,49 @@ def check_readme() -> List[str]:
     return errors
 
 
+DOC_STATUS_PATTERN = re.compile(r"^状態[:：]\s*(進行中|完了|中断)")
+DOC_CHECKED_PATTERN = re.compile(r"^\s*[-*]\s+\[[xX]\]")
+DOC_UNCHECKED_PATTERN = re.compile(r"^\s*[-*]\s+\[ \]")
+
+
+def check_docs() -> List[str]:
+    """docs/ の計画書(チェックリストを持つ Markdown)の状態行を検査する。
+
+    計画書の完了後も陳腐化した現況記述が残る事例があったため、状態行の有無と
+    「進行中だが全項目チェック済み」の矛盾を機械検出する。
+    """
+    errors = []
+    docs_dir = REPO_ROOT / "docs"
+    if not docs_dir.is_dir():
+        return errors
+    for path in sorted(docs_dir.glob("*.md")):
+        rel = path.relative_to(REPO_ROOT)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        has_checklist = any(
+            DOC_CHECKED_PATTERN.match(l) or DOC_UNCHECKED_PATTERN.match(l)
+            for l in lines
+        )
+        if not has_checklist:
+            continue
+        status = next(
+            (m for l in lines if (m := DOC_STATUS_PATTERN.match(l))), None
+        )
+        if status is None:
+            errors.append(
+                f"{rel}: チェックリストを持つ計画書に"
+                "`状態:` 行(進行中/完了/中断)がありません"
+            )
+            continue
+        if status.group(1) == "進行中" and not any(
+            DOC_UNCHECKED_PATTERN.match(l) for l in lines
+        ):
+            errors.append(
+                f"{rel}: 全項目がチェック済みですが `状態: 進行中` のままです。"
+                "完了か中断へ更新してください"
+            )
+    return errors
+
+
 def check_plugin_json() -> List[str]:
     errors = []
     path = REPO_ROOT / ".devin-plugin" / "plugin.json"
@@ -285,6 +330,7 @@ def main() -> int:
         ("skills/*/SKILL.md", check_skills()),
         ("AGENTS.md", check_agents()),
         ("README.md", check_readme()),
+        ("docs/*.md", check_docs()),
         ("plugin.json", check_plugin_json()),
     ]
     if args.version_base:

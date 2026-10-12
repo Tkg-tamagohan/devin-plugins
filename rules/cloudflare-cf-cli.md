@@ -6,7 +6,8 @@ description: Cloudflare のリソースをコマンドラインから作成、�
 # Cloudflare の操作は `cf` CLI を使う
 
 Cloudflare のリソースを CLI から操作するときは、REST API を curl で組み立てず、`cf` CLI を使う。
-`cf` は Cloudflare の OpenAPI スキーマから生成される CLI で、wrangler の約 280 操作に対して API 全体の 3,000 以上の操作をカバーし(執筆時点 2026-09、`cf@1.0.0-beta.5`)、Pages、Zero Trust/Access、DNS などを一つのツールで扱える。
+`cf` は Cloudflare の OpenAPI スキーマから生成される CLI で、wrangler がカバーしない Zero Trust/Access などを含めて API 全体を一つのツールで扱える。
+対象範囲や wrangler との使い分けの詳細はスキル `shared-skills:cf-cli` を参照する。
 
 ## 手順
 
