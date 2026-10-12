@@ -58,7 +58,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 AGENTS.md                          # 全セッションに常時適用される共通ルール
 LICENSE                            # MIT License
 .sloplintignore                    # 文書リントの検査対象から外すパス一覧
-docs/                              # 計画書と決定記録(セッションをまたぐ作業の引き継ぎ文書)
+docs/                              # 計画書と決定記録(セッションをまたぐ作業の引き継ぎ文書。計画書は先頭に `状態:` 行を持つ)
 rules/<name>.md                    # トリガー付きルール(description に合う状況のセッションでのみ本文が読まれる)
 skills/<name>/SKILL.md             # スキル本体(手順や知識。呼び出されたときに読まれる)
 skills/plugin-authoring/           # このリポジトリ自体の編集手順、作成指針(guidelines.md)、テンプレート、生成スクリプト(scripts/new_entry.py)、構造チェック(scripts/check_plugin.py)
@@ -67,6 +67,10 @@ skills/japanese-tech-writing/references/ # 悪い表現の語彙カタログ(slo
 skills/repo-drift-audit/child-prompts.md # 監査で子セッションへ渡すプロンプトの定型
 .github/workflows/plugin-checks.yml # リンターの回帰テストと文書リント、構造チェックを実行する CI
 ```
+
+`docs/` の計画書は、見出しの直下に `状態: 進行中` / `状態: 完了` / `状態: 中断` のいずれかの状態行を持つ。
+作業が区切りに達したら状態を更新し、完了済みの計画書が現況と矛盾する記述を残さないようにする。
+状態行の有無と「進行中だが全項目チェック済み」の矛盾は CI の `check_plugin.py` が検査する。
 
 ルールやスキルをどこに置くか、どの粒度で分けるかの基準は `skills/plugin-authoring/guidelines.md` にまとめている。
 新しく追加するときは、スキル `shared-skills:plugin-authoring` の手順に従う。

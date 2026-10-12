@@ -1,5 +1,7 @@
 # yomiyasu 更新の取り込み実装計画
 
+状態: 完了
+
 上流 [nanaism/yomiyasu](https://github.com/nanaism/yomiyasu) の v1.0.8 までの更新を、スキル `shared-skills:japanese-tech-writing` へ取り込む計画。
 確定した判断は `docs/decision-records.md` へ記録し、論点 A〜E はすべて推奨案で確定済みである。
 
@@ -92,7 +94,7 @@
 
 ## 引き継ぎ手順
 
-- 現在地は本書のチェックリストと、devin-plugins でマージ済みの該当 PR から確認する。
+- 本計画は完了済みであり、各フェーズの内容はマージ済みの該当 PR から確認する。
 - ブランチは `devin/$(date +%s)-yomiyasu-port-p<N>` とし、フェーズごとに PR を分ける。
 - ローカル検証の一式は `test_slop_lint.py`、`test_catalog_consistency.py`、`test_slop_diff.py`、`test_new_entry.py`、`check_plugin.py`(`--version-base origin/main`、事前に `git fetch origin main`)、全 Markdown の一括リント(`--strict`)である。
 - 上流ファイルの差分確認は `git clone` した yomiyasu リポジトリで行う。
