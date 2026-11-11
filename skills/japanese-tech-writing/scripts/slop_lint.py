@@ -38,6 +38,12 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
   1文書3件に制限。否定構文は「AでもBでもない。Cだ。」
   「Aじゃない、Bです。」と段落内ソフト改行またぎを検出し、
   「でもある」で終わる対比を免除、多発は info で指摘する
+- v3.0.0 追従(Phase 4): JSON 出力を上流 v2 形式(format_version=2)
+  へ更新し、score を廃止して rule_penalty_score へ置き換えた。
+  終了コードを再定義し(0: --strict/--fail-on の条件非該当、
+  1: 条件該当、2: 使い方・入力の誤り、3: 内部エラー)、--fail-on を
+  追加した。通常出力も上流の形式へ揃えた
+  (docs/decision-records.md Y-19。--doc-type/--reader は導入しない。Y-20)
 
 検出結果は機械的な見直し候補であり、SKILL.md の規範で正当な
 記述と判断できるものはそのまま保持する。
@@ -47,9 +53,11 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
 import sys
 import os
 import re
+import errno
 import argparse
 import functools
 import json
+import traceback
 import unicodedata
 from bisect import bisect_right
 from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
@@ -64,6 +72,7 @@ try:
         analyze_markdown, decode_source, input_path_problem,
         line_visible_text, range_overlaps_protected,
         resolve_words, current_directory, WordsError, words_context,
+        words_label,
     )
 except ModuleNotFoundError as error:
     # spec_from_file_location などで読み込まれた場合でも同ディレクトリの
@@ -93,6 +102,13 @@ except ModuleNotFoundError as error:
     current_directory = _visibility_module.current_directory
     WordsError = _visibility_module.WordsError
     words_context = _visibility_module.words_context
+    words_label = _visibility_module.words_label
+
+# JSON 出力の形式の版。上流 v3.0.0 の lint JSON(形式2)に揃えた。
+# 1 は score/is_clean を持つ旧形式。
+LINT_FORMAT_VERSION = 2
+# 上流 yomiyasu_lint.py v3.0.0 に対応する版(選択的移植のため全機能は揃っていない)。
+__version__ = "3.0.0-port"
 
 # 絵文字正規表現パターン(CJK 統合漢字拡張などのサロゲートペア漢字を除外した厳密な絵文字範囲)
 EMOJI_PATTERN = re.compile(
@@ -830,8 +846,11 @@ def _extra_negation_line_numbers(analysis):
 
 
 def _metrics_from_analysis(analysis):
-    """語彙・文末検査と同じ不透明領域の境界で構造メトリクスを算出する"""
+    """語彙・文末検査と同じ不透明領域の境界で構造メトリクスを算出する。
+    戻り値は (metrics, 点数計算用の地の文の字数)。地の文は行の見える文字から
+    空白を除いたもので、見出し・見出しの罫線・水平線は含めない。"""
     plain_rows = []
+    prose_chars = 0
     for row in analysis["lines"]:
         stripped = row["raw"].strip()
         if row["kind"] in ("code", "frontmatter", "html_block", "reference_definition"):
@@ -843,6 +862,8 @@ def _metrics_from_analysis(analysis):
             continue
         if stripped:
             plain_rows.append((row, visible))
+            if row["kind"] not in ("heading", "heading_underline", "thematic_break"):
+                prose_chars += len("".join(visible.split()))
     total_lines = len(plain_rows)
     list_lines = 0
     for row, _ in plain_rows:
@@ -855,14 +876,54 @@ def _metrics_from_analysis(analysis):
     char_count = len(re.sub(r"\s+", "", plain_content))
     bold_per_1000 = bold_count / char_count * 1000 if char_count > 0 else 0
     list_ratio = list_lines / total_lines if total_lines > 0 else 0
-    return {"char_count": char_count, "total_lines": total_lines, "list_lines": list_lines,
-            "list_ratio": round(list_ratio, 3), "bold_count": bold_count,
-            "bold_per_1000": round(bold_per_1000, 2)}
+    metrics = {"char_count": char_count, "total_lines": total_lines, "list_lines": list_lines,
+               "list_ratio": round(list_ratio, 3), "bold_count": bold_count,
+               "bold_per_1000": round(bold_per_1000, 2)}
+    return metrics, prose_chars
 
 
 def analyze_markdown_metrics(text: str) -> Dict[str, Any]:
     """太字頻度、箇条書き比率などの構造メトリクスを算出(引用文やコードブロックは除外)"""
-    return _metrics_from_analysis(analyze_markdown(text))
+    return _metrics_from_analysis(analyze_markdown(text))[0]
+
+
+# rule_penalty_score の計算に使う重み。上流 v3.0.0 の _PENALTY_WEIGHTS などに対応する。
+_PENALTY_WEIGHTS = {"error": 3, "warn": 2, "info": 1}
+_PENALTY_FLOOR = 1000
+_PENALTY_HALF = 40
+# 文書単位の候補(太字・箇条書きのメトリクス)は地の文の長さで割らずに件数で効かせる
+_DOCUMENT_RULE_WEIGHTS = {"excess_bold": 2, "excess_list": 2, "bold_label_list": 1}
+_SUMMARY_RULES = ("negative_parallelism_density",)
+# info の「見直しのきっかけ」の規則。上流の _V220_RULES・_V230_RULES・_V250_RULES に
+# 対応し、点数を計算する前に除く(上流の _V240_RULES の slide_comma は --doc-type
+# 依存のため本スキルでは実装しない。docs/decision-records.md Y-20)
+_SCORE_EXCLUDED_RULES = ("calque", "metaphor_label", "say_hedge", "thin_evaluation",
+                         "katakana_term", "dialogue_period", "narrative_density",
+                         "copy_comma_noun", "bare_verb_chain", "project_term",
+                         "renyo_noun", "ai_phrase")
+_DASH_RULES = ("dash_decoration", "dash_insertion", "dash_list_ending")
+
+
+def _rule_penalty_score(findings: list[dict], prose_chars: int, dash_hits: int) -> int:
+    """行の候補の密度と文書単位の候補から、整数だけで目安を計算する。"""
+    if not findings:
+        return 100
+    line_weight = 0
+    document_weight = 0
+    dash_found = 0
+    for finding in findings:
+        rule = finding["rule"]
+        if rule in _DASH_RULES:
+            dash_found += 1
+        if rule in _DOCUMENT_RULE_WEIGHTS:
+            document_weight += _DOCUMENT_RULE_WEIGHTS[rule]
+        elif rule not in _SUMMARY_RULES:
+            line_weight += _PENALTY_WEIGHTS[finding["severity"]]
+    line_weight += max(0, dash_hits - dash_found) * _PENALTY_WEIGHTS["warn"]
+    m = max(prose_chars, _PENALTY_FLOOR)
+    num = 100 * _PENALTY_HALF * m
+    den = (_PENALTY_HALF + document_weight) * m + 1000 * line_weight
+    return max(1, min(99, (2 * num + den) // (2 * den)))
 
 
 # 文末の後ろの飾り(絵文字・空白・閉じかっこ・矢印・波線と、対のない閉じ引用符)を除いて文の型を読む。
@@ -3612,7 +3673,7 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
     analysis = analyze_markdown(text)
     rule9_context = _rule9_context(analysis)
     extra_negation_lines = _extra_negation_line_numbers(analysis)
-    metrics = _metrics_from_analysis(analysis)
+    metrics, prose_chars = _metrics_from_analysis(analysis)
     fragment_run_lines = _fragment_run_line_numbers(analysis)
     sentence_records = _plain_sentence_records(analysis)
     sentences = [(line, visible) for line, visible, _, _ in sentence_records]
@@ -3632,7 +3693,6 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
     bold_label_lines = []
     negation_lines = []
     pause_lines = None
-    dash_count = 0
     # 文書にダッシュが一つもなければ行ごとのダッシュ検査を丸ごと省く
     dash_possible = (_dash_finding is not _DASH_FINDING_DEFAULT or _DASH_RUN is not _DASH_RUN_DEFAULT
                      or any(char in text for char in DASH_CHARS))
@@ -3771,12 +3831,12 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
             previous_sentence = ""
             continue
 
-        # ダッシュ記号の検査(3ルール。区間・出典・引用・図罫線はマスクし、1文書3件まで)
+        # ダッシュ記号の検査(3ルール。区間・出典・引用・図罫線はマスクする。
+        # 表示の1文書3件への制限は検査のあとで当て、点数には全部を数える)
         if dash_possible:
             dash = _dash_finding(plain_text, line_no, stripped)
-            if dash and dash_count < DASH_FINDING_LIMIT:
+            if dash:
                 findings.append(dash)
-                dash_count += 1
 
         # 見出し行は補足カッコとダッシュのみ検査し、本文の語彙・構文検査はスキップ
         if kind == "heading":
@@ -4044,18 +4104,206 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
     findings.extend(_v220_shape_findings(analysis, findings, None))
     findings.extend(_v220_document_findings(analysis))
     findings.extend(_project_term_findings(analysis, words))
-    findings, _ = _apply_words(findings, words)
+    findings, words_context = _apply_words(findings, words)
+    # ダッシュの候補は、語の一覧で外したあとに残ったものの初めから DASH_FINDING_LIMIT 件だけを出し、
+    # 点数には全部を数える
+    dash_hits = 0
+    shown = []
+    for finding in findings:
+        if finding["rule"] in _DASH_RULES:
+            dash_hits += 1
+            if dash_hits > DASH_FINDING_LIMIT:
+                continue
+        shown.append(finding)
+    findings = shown
 
-    # スコア計算(100 点満点からの減点方式: warn=5 点, info=2 点)
-    penalty = sum(5 if f["severity"] in ("warn", "error") else 2 for f in findings)
-    score = max(0, 100 - penalty)
+    # 候補の重みを地の文1,000字あたりに直した x から、100 × 40 ÷ (40 + x) を丸める目安。品質の点数ではない。
+    # info の見直し規則(上流 2.2.0 以降の規則)の候補は点数を計算する前に除く
+    rule_penalty_score = _rule_penalty_score(
+        [finding for finding in findings if finding["rule"] not in _SCORE_EXCLUDED_RULES],
+        prose_chars, dash_hits)
+    counts = {"error": 0, "warn": 0, "info": 0}
+    for finding in findings:
+        if finding["severity"] in counts:
+            counts[finding["severity"]] += 1
+    context = {}
+    if words_context is not None:
+        context["words"] = words_context
 
     return {
-        "score": score,
-        "is_clean": len(findings) == 0,
+        "format": "yomiyasu-lint",
+        "format_version": LINT_FORMAT_VERSION,
+        "tool_version": __version__,
+        "candidate_count": len(findings),
+        "counts": counts,
+        "no_rule_findings": len(findings) == 0,
+        "rule_penalty_score": rule_penalty_score,
+        "not_judged": ["meaning_preservation", "reader_comprehension"],
+        "context": context,
         "metrics": metrics,
         "findings": [_public_finding(f) for f in findings]
     }
+
+
+# ---- 人が読む出力 ----
+
+_REPORT_HEADER = (
+    "表現・書式の検査を実行しました。",
+    "見直し候補: {count}件",
+    "この検査では、意味の保持と読者にとっての分かりやすさは判定していません。",
+)
+
+
+def render_findings(result: Dict[str, Any]) -> str:
+    """内訳の行と候補の並びだけを返す（候補が0件なら空の文字列）。末尾に改行は付けない。
+
+    候補は行番号の順に並べる（同じ行の中は findings の順のまま）。findings の順そのものは変えない。
+    """
+    findings = result["findings"]
+    if not findings:
+        return ""
+    counts = result["counts"]
+    blocks = ["内訳: error {}件、warn {}件、info {}件".format(counts["error"], counts["warn"], counts["info"])]
+    for finding in sorted(findings, key=lambda item: item["line"]):
+        lines = ["L{} [{}] {}: {}".format(finding["line"], finding["severity"].upper(), finding["rule"], finding["message"])]
+        for snippet_line in str(finding["snippet"]).split("\n"):
+            snippet_line = snippet_line.rstrip()
+            if snippet_line:
+                lines.append("  > " + snippet_line)
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _words_line(result: dict) -> Optional[str]:
+    """語の一覧を使ったときの行。使わないときは None。"""
+    words = (result.get("context") or {}).get("words")
+    if not isinstance(words, dict):
+        return None
+    return words_label(words) + "allow で外した候補 {}件。".format(sum((words.get("allow_removed") or {}).values()))
+
+
+def render_report(result: Dict[str, Any]) -> str:
+    """通常の出力の全体（1〜3行目、語の一覧を使ったときの行、候補があれば内訳と候補の並び）を返す。
+    末尾に改行は付けない。"""
+    header = "\n".join(_REPORT_HEADER).format(count=result["candidate_count"])
+    words_line = _words_line(result)
+    if words_line is not None:
+        header += "\n" + words_line
+    body = render_findings(result)
+    return header + "\n\n" + body if body else header
+
+
+# ---- CLI ----
+
+# --strict と --fail-on の条件。値は (終了コード1の行に書く文, 当たったかを決める重さ)。
+_FAIL_CONDITIONS = {
+    "strict": ("--strict の条件（warn か error の候補が1件以上）", ("warn", "error")),
+    "warn": ("--fail-on=warn の条件（warn か error の候補が1件以上）", ("warn", "error")),
+    "error": ("--fail-on=error の条件（error の候補が1件以上）", ("error",)),
+}
+_MEANING_RISK_MESSAGE = (
+    "--fail-on=meaning-risk は lint では使えません。lint は1つの文章だけを見るので、意味の変化は判定できません。"
+    "意味リスクの判定は別計画で、現在はどのコマンドでも使えません。"
+)
+_PENALTY_HELP = """rule_penalty_score（--json の目安）:
+  候補が0件なら100。候補があれば 100 × 40 ÷ (40 + x) を四捨五入し、1〜99に収めます。
+  x は、行ごとの候補の重み（error 3、warn 2、info 1）を地の文1,000字あたりに直した数です。
+  地の文はコード、表、引用、見出し、前置きの設定（frontmatter）、HTML、URL と空白を除いた字数で、
+  1,000字に満たなければ1,000字として割ります。
+  excess_bold と excess_list は1件で2、bold_label_list は1を x に足し、
+  negative_parallelism_density は数えません。ダッシュの規則に当たった行は、候補に出さない4行目からも数えます。
+  上流 2.2.0 以降で足した次の規則の候補も数えず、その候補だけのときは100です: calque、metaphor_label、
+  say_hedge、thin_evaluation、katakana_term、dialogue_period、narrative_density、copy_comma_noun、
+  bare_verb_chain、project_term、renyo_noun、ai_phrase。
+  CI では --strict か --fail-on、または counts を使ってください。
+"""
+_EXIT_CODES = """終了コード:
+  0  検査を最後まで実行し、--strict と --fail-on の条件に当たらなかった（候補の有無によらない）。-h も0
+  1  --strict か --fail-on の条件に当たった
+  2  使い方か入力の誤り（ファイルを開けない、作業フォルダの外や名前が点で始まる部分を含むパスを渡した、
+     UTF-8 として読めない、標準入力を読めない、使えない --fail-on の値、語の一覧を読めない）
+  3  予期しない内部の誤り（標準エラーにトレースバックを出す）か、出力先が閉じられて結果を最後まで書けなかった"""
+
+
+class _ConditionAction(argparse.Action):
+    """--strict と --fail-on を、指定した順に1つの並びに集める。"""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        conditions = list(getattr(namespace, "conditions", None) or [])
+        conditions.append(("strict", option_string) if self.nargs == 0 else ("fail-on", values))
+        setattr(namespace, "conditions", conditions)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="slop_lint.py",
+        description="日本語文章の AI っぽさ機械検査リンター",
+        epilog=_PENALTY_HELP + "\n" + _EXIT_CODES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("file", nargs="?",
+                        help="検査対象の Markdown ファイルパス(指定なしまたは - の場合は標準入力)")
+    parser.add_argument("--json", action="store_true",
+                        help="結果を JSON(形式2)で出力します。日本語は \\uXXXX の形で出します。"
+                             "rule_penalty_score は、候補の多さを地の文の長さで割った目安です(下の式)。合否には使わないでください。")
+    parser.add_argument("--strict", action=_ConditionAction, nargs=0, dest="conditions",
+                        help="warn か error の候補が1件でもあれば、終了コード1で終わります。"
+                             "info の候補と点数は使いません(--fail-on=warn と同じです)。")
+    parser.add_argument("--fail-on", action=_ConditionAction, dest="conditions", metavar="{warn,error}",
+                        help="指定した中身の候補があれば、終了コード1で終わります。"
+                             "warn: warn か error の候補。error: error の候補(太字が表示されない書き方)。"
+                             "何度でも、カンマ区切りでも指定できます。点数は条件に使えません。"
+                             "meaning-risk は意味リスクの判定が別計画のため lint では使えません。")
+    parser.set_defaults(conditions=[])
+    return parser
+
+
+def _use_utf8(stream: object, **options: str) -> None:
+    # 改行は OS によらず "\n" で書く(Windows の既定では "\r\n" になる)
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", newline="\n", **options)
+
+
+def _error(message: str) -> None:
+    """標準エラーに1行書く。標準エラーがないとき(pythonw など)は何もしない。"""
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        _use_utf8(stream, errors="backslashreplace")
+        print(message, file=stream)
+    except (OSError, ValueError):
+        # 標準エラーも閉じられているときは、書かずに終える。
+        pass
+
+
+def _conditions(raw: list) -> tuple:
+    """--strict と --fail-on の並びを、条件の名前の並びにする。使えない値があれば誤りの文を返す。
+
+    meaning-risk は、ほかの値と混ぜても、ほかの誤りより先に断る。
+    """
+    names = []
+    unknown = []
+    for kind, value in raw:
+        if kind == "strict":
+            names.append("strict")
+            continue
+        # 大文字と小文字、「_」と「-」は区別しない(WARN、meaning_risk も受ける)。
+        pieces = [piece.strip().lower().replace("_", "-") for piece in value.split(",") if piece.strip()]
+        if not pieces:
+            # 空、空白だけ、カンマだけの値は、目に見えないので「(空)」と書く。
+            unknown.append("（空）")
+        for piece in pieces:
+            if piece in ("warn", "error"):
+                names.append(piece)
+            elif piece == "meaning-risk":
+                return None, _MEANING_RISK_MESSAGE
+            else:
+                unknown.append(piece)
+    if unknown:
+        return None, "--fail-on に使えない値です: {}。lint で使えるのは warn と error です。".format(unknown[0])
+    return names, None
 
 
 def _path_problem(path):
@@ -4096,61 +4344,87 @@ def _read_input(path):
         return None, "Error reading stdin: UTF-8 として読めません"
 
 
-def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="日本語文章の AI っぽさ機械検査リンター")
-    parser.add_argument("file", nargs="?", help="検査対象の Markdown ファイルパス(指定なしまたは - の場合は標準入力)")
-    parser.add_argument("--json", action="store_true", help="JSON 形式で出力")
-    parser.add_argument("--strict", action="store_true", help="警告が 1 件でもあれば非ゼロ(終了コード 1)で終了")
-
-    args = parser.parse_args()
-
+def _run(argv) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    conditions, problem = _conditions(args.conditions)
+    if problem:
+        _error(problem)
+        return 2
     try:
         # .yomiyasu-words/(allow.txt、flag.txt、flag-patterns.txt)を作業ディレクトリから探す
         words = resolve_words(current_directory(), None, False)
     except WordsError as error:
-        print(str(error), file=sys.stderr)
-        sys.exit(2)
-
+        _error(str(error))
+        return 2
     problem = _path_problem(args.file)
     if problem:
-        print(problem, file=sys.stderr)
-        sys.exit(2)
+        _error(problem)
+        return 2
     content, problem = _read_input(args.file)
     if problem:
-        print(problem, file=sys.stderr)
-        sys.exit(2)
+        _error(problem)
+        return 2
 
     result = lint_text(content, words=words)
+
+    hit = []
+    for name in conditions:
+        text, severities = _FAIL_CONDITIONS[name]
+        if text not in hit and any(result["counts"][severity] for severity in severities):
+            hit.append(text)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=True, indent=2))
     else:
-        print("=" * 60)
-        print(f"AI っぽさ 検査レポート (スコア: {result['score']}/100)")
-        print("=" * 60)
-        m = result["metrics"]
-        print(f"・文字数: {m['char_count']} | 行数: {m['total_lines']}")
-        print(f"・太字頻度: 1,000 字あたり {m['bold_per_1000']} 個 (情報基準: 3.0 超で表示)")
-        print(f"・箇条書き比率: {round(m['list_ratio']*100, 1)}% (情報基準: 25% 超で表示)")
-        print("-" * 60)
+        print(render_report(result))
+        if hit:
+            print()
+            print("終了コード1: {}に当たりました（error {}件、warn {}件）。".format(
+                "、".join(hit), result["counts"]["error"], result["counts"]["warn"]))
+    # 書き出しの失敗(読む側が先に閉じたなど)を、ここで BrokenPipeError として受けられるようにする。
+    if sys.stdout is not None:
+        sys.stdout.flush()
+    return 1 if hit else 0
 
-        if result["is_clean"]:
-            print("[PASS] 検査ルールによる指摘はありません。")
-        else:
-            print(f"[NOTICE] {len(result['findings'])} 件の見直し候補が見つかりました。\n")
-            for f in result["findings"]:
-                sev = f"[{f['severity'].upper()}]"
-                print(f"L{f['line']} {sev} {f['message']}")
-                print(f"  > {f['snippet']}\n")
 
-    if args.strict:
-        warn_count = sum(1 for f in result["findings"] if f["severity"] in ("warn", "error"))
-        if warn_count > 0:
-            sys.exit(1)
-    sys.exit(0)
+def _closed_output_on_windows(error: Exception) -> bool:
+    """Windows で、読む側が閉じたパイプに書いたときの例外か。Windows では BrokenPipeError ではなく、errno が EINVAL の
+    OSError になる。ファイル名のある OSError(Windows で名前に使えない字を含むパスなど)と、POSIX では、ほかの誤りとして扱う。"""
+    return (os.name == "nt" and type(error) is OSError and error.errno == errno.EINVAL
+            and error.filename is None and error.filename2 is None)
+
+
+def _silence_stdout() -> None:
+    """標準出力を os.devnull に向け直す。インタプリタの終わりでもう一度書き出しに失敗しないようにする。"""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def main(argv=None) -> int:
+    """CLI。終了コードを返す(0: 条件に当たらない、1: 条件に当たった、2: 使い方か入力の誤り、3: 内部の誤り)。"""
+    try:
+        _use_utf8(sys.stdout)
+        return _run(argv)
+    except BrokenPipeError:
+        # 出力先(パイプの読む側)が先に閉じた。lint の不具合ではないので、トレースバックは出さない。
+        # 結果を最後まで書けなかったので、終了コードは3にする。
+        _silence_stdout()
+        _error("slop_lint.py: 出力先が閉じられたため、結果を最後まで書けませんでした。")
+        return 3
+    except Exception as error:
+        if _closed_output_on_windows(error):
+            # Windows で出力先が閉じられた。上の BrokenPipeError と同じく扱う
+            _silence_stdout()
+            _error("slop_lint.py: 出力先が閉じられたため、結果を最後まで書けませんでした。")
+            return 3
+        _error("slop_lint.py: 内部エラー: {}: {}".format(type(error).__name__, error))
+        _error(traceback.format_exc().rstrip("\n"))
+        return 3
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
