@@ -5,7 +5,8 @@ ID は <対象>-<連番>: MENTION=言及除外、CHAIN=名詞連結、END=文末
 NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞、EMOJI=絵文字、
 NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準入出力の UTF-8 化、
 V2=v1.1.1 Phase 2 の検出強化(語彙パターン、フィラー文単位化、info 文型、絞り込み)、
-V3=v1.1.1 Phase 3 のダッシュ3ルール化と否定構文強化。
+V3=v1.1.1 Phase 3 のダッシュ3ルール化と否定構文強化、
+P2=yomiyasu v3.0.0 Phase 2 の info 系規則14件。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -886,6 +887,182 @@ class TestStdioEncoding(unittest.TestCase):
         result = self.assert_ascii_json(run_cp932([LINT, path, "--json"]))
         snippets = [f["snippet"] for f in result["findings"]]
         self.assertTrue(any("—" in s for s in snippets))
+
+
+class TestYomiyasuV3Phase2(unittest.TestCase):
+    """yomiyasu v3.0.0 Phase 2: info 系規則14件(上流 test_v2xx 系からの選択的移植)
+
+    --doc-type を持たないため、上流で種類を限る規則(pause_comma、dialogue_period、
+    narrative_density)も info の常時検出とする(Y-20)。project_term は .yomiyasu-words/
+    の既定ファイルがないため、words を直接渡して検査する。検出例・非検出例は上流テストの類例。
+    """
+
+    FILLER = ("これは、みんなにくばる、ためしのぶんしょうです。よんでから、つぎのところへすすんでください。"
+              "わからないところは、あとでききます。")
+    LABEL_BODY = ("同じ顧客が同じ内容で24時間以内に送った問い合わせは、1件にまとめました。"
+                  "区分は、受け付けた担当者が付けたものをそのまま使い、付け忘れの312件だけを集計の担当が読んで付け直しました。")
+    WORDS = {"path": "/x", "allow": (), "flag": ("根の",), "allow_lines": 0,
+             "flag_lines": 1, "allow_sha256": None, "flag_sha256": "0" * 64}
+
+    def findings(self, text, words=None):
+        return lint_text(text, words=words)["findings"]
+
+    def rules(self, text, words=None):
+        return [f["rule"] for f in self.findings(text, words=words)]
+
+    def severities(self, rule, text, words=None):
+        return [f["severity"] for f in self.findings(text, words=words) if f["rule"] == rule]
+
+    # ai_phrase
+    def test_p2_01_AIの言い回しをinfoで検出する(self):
+        text = "今回の結果は、市場が回復に向かうという見立てです。\n"
+        self.assertIn("ai_phrase", self.rules(text))
+        self.assertEqual(self.severities("ai_phrase", text), ["info"])
+
+    def test_p2_02_人の見立ては検出しない(self):
+        self.assertNotIn("ai_phrase", self.rules("医師の見立てでは、軽い風邪です。\n"))
+
+    # renyo_noun
+    def test_p2_03_サ変名詞の連用形をinfoで検出する(self):
+        text = "出した数字は、表の値との確かめが済んでいません。\n"
+        self.assertIn("renyo_noun", self.rules(text))
+        self.assertEqual(self.severities("renyo_noun", text), ["info"])
+
+    def test_p2_04_辞書形は検出しない(self):
+        self.assertNotIn("renyo_noun", self.rules("表の値との確認が済んでいません。\n"))
+
+    # project_term
+    def test_p2_05_語彙リストのflag語をinfoで検出する(self):
+        text = "木の根の張り方を調べます。\n"
+        self.assertIn("project_term", self.rules(text, self.WORDS))
+        self.assertEqual(self.severities("project_term", text, self.WORDS), ["info"])
+
+    def test_p2_06_allowの語は検出しない(self):
+        words = dict(self.WORDS, allow=("根の",), allow_lines=1)
+        self.assertNotIn("project_term", self.rules("木の根の張り方を調べます。\n", words))
+
+    def test_p2_07_熟語の内部は検出しない(self):
+        # 「大根」「箱根」のような漢字複合語の内部では当たらない(上流の境界規則)
+        self.assertNotIn("project_term", self.rules("大根の煮物を作りました。\n", self.WORDS))
+        self.assertNotIn("project_term", self.rules("箱根の宿に泊まりました。\n", self.WORDS))
+
+    def test_p2_08_語彙リストがなければ検出しない(self):
+        self.assertNotIn("project_term", self.rules("木の根の張り方を調べます。\n"))
+
+    # thin_evaluation
+    def test_p2_09_中身の薄い評価をinfoで検出する(self):
+        text = "委託先の回答の品質も高いです。\n"
+        self.assertIn("thin_evaluation", self.rules(text))
+        self.assertEqual(self.severities("thin_evaluation", text), ["info"])
+
+    def test_p2_10_数値の根拠がある評価は検出しない(self):
+        self.assertNotIn("thin_evaluation",
+                         self.rules("消費電力は従来品の9ワットから6ワットに下がり、省エネ性能が高くなりました。\n"))
+
+    # katakana_term
+    def test_p2_11_意味の薄いカタカナ語をinfoで検出する(self):
+        text = "顧客とのエンゲージメントを高めることも課題です。\n"
+        self.assertIn("katakana_term", self.rules(text))
+        self.assertEqual(self.severities("katakana_term", text), ["info"])
+
+    def test_p2_12_言及の中のカタカナ語は検出しない(self):
+        self.assertNotIn("katakana_term",
+                         self.rules("ポータルは、すでに全社で使っている「サクラ業務プラットフォーム」の上に作ります。\n"))
+
+    # metaphor_label
+    def label_document(self, heading, body):
+        return "# 社内の資料\n\n{}\n\n{}\n\n{}\n".format(heading, body, self.FILLER)
+
+    def test_p2_13_見出しの比喩ラベルをinfoで検出する(self):
+        text = self.label_document("## 数え係", self.LABEL_BODY)
+        self.assertIn("metaphor_label", self.rules(text))
+        self.assertEqual(self.severities("metaphor_label", text), ["info"])
+
+    def test_p2_14_普通の見出しは検出しない(self):
+        text = self.label_document("## 件数の推移", self.LABEL_BODY)
+        self.assertNotIn("metaphor_label", self.rules(text))
+
+    # say_hedge
+    def test_p2_15_と言えるでしょうの文末をinfoで検出する(self):
+        text = "7月以降の増加は、定期便の開始が主な原因だったと言えるでしょう。\n"
+        self.assertIn("say_hedge", self.rules(text))
+        self.assertEqual(self.severities("say_hedge", text), ["info"])
+
+    def test_p2_16_引用の中のと言えるでしょうは検出しない(self):
+        self.assertNotIn("say_hedge", self.rules("「これは一生ものと言えるでしょう」というお便りも届いています。\n"))
+
+    # narrative_density / dialogue_period(上流は doc-type 限定。ここでは常時 info で出る)
+    NARRATIVE_TEXT = (
+        "導入の手順について説明します。" * 3 + "\n\n"
+        + "\n".join("- 設定値は{}で、確認項目は{}件です。".format(100 + i, 20 + i) for i in range(1, 16)) + "\n\n"
+        + "各手順の結果は表にまとめ、差分が10%以上あれば再測定します。測定は3回ずつ行い、中央値を採用します。"
+        "値が前回比で5%を超えて変わった場合は、設定の見直し対象とします。" * 8
+    )
+
+    def test_p2_17_読み物の一人称と数字の密度をinfoで検出する(self):
+        text = self.NARRATIVE_TEXT + "\n"
+        self.assertIn("narrative_density", self.rules(text))
+        self.assertEqual(self.severities("narrative_density", text), ["info"])
+
+    def test_p2_18_一人称の多い読み物は検出しない(self):
+        text = self.NARRATIVE_TEXT.replace(
+            "各手順の結果は", "私はこの手順を何度も試しました。私の経験では、各手順の結果は") + "\n"
+        self.assertNotIn("narrative_density", self.rules(text))
+
+    def test_p2_19_句点で終わる台詞の連続をinfoで検出する(self):
+        text = "\n".join("「確認{}が済みました。」".format(i) for i in range(1, 11)) + "\n"
+        self.assertIn("dialogue_period", self.rules(text))
+        self.assertEqual(self.severities("dialogue_period", text), ["info"])
+
+    def test_p2_20_句点で終わらない台詞は検出しない(self):
+        text = "\n".join("「確認{}が済みました」".format(i) for i in range(1, 11)) + "\n"
+        self.assertNotIn("dialogue_period", self.rules(text))
+
+    # copy_comma_noun / bare_verb_chain(文の形の規則)
+    def test_p2_21_名詞を並べる読点をinfoで検出する(self):
+        text = "丁寧な、人。\n"
+        self.assertIn("copy_comma_noun", self.rules(text))
+        self.assertEqual(self.severities("copy_comma_noun", text), ["info"])
+
+    def test_p2_22_副詞の読点は検出しない(self):
+        self.assertNotIn("copy_comma_noun", self.rules("彼は、毎朝、コーヒーを飲みます。\n"))
+
+    def test_p2_23_動詞だけを並べる文をinfoで検出する(self):
+        text = "切るか、続けるか、決める。\n"
+        self.assertIn("bare_verb_chain", self.rules(text))
+        self.assertEqual(self.severities("bare_verb_chain", text), ["info"])
+
+    def test_p2_24_主語や目的語のある動詞の連なりは検出しない(self):
+        self.assertNotIn("bare_verb_chain",
+                         self.rules("開発者が書き、CI が組み立て、レビュー担当が確かめる。\n"))
+
+    # cleft_list_ending
+    def test_p2_25_のはのあとの名詞並べをinfoで検出する(self):
+        text = "書き換えの中で変動したのは、画面、帳票、通知。\n"
+        self.assertIn("cleft_list_ending", self.rules(text))
+        self.assertEqual(self.severities("cleft_list_ending", text), ["info"])
+
+    def test_p2_26_述語まで書いた文は検出しない(self):
+        self.assertNotIn("cleft_list_ending", self.rules("変わったのは、画面、帳票、通知です。\n"))
+
+    # instruction_residue
+    def test_p2_27_AIへの指示残りをinfoで検出する(self):
+        text = "今回は一般論ではなく、自分の体験に絞って紹介します。\n"
+        self.assertIn("instruction_residue", self.rules(text))
+        self.assertEqual(self.severities("instruction_residue", text), ["info"])
+
+    def test_p2_28_読者の対象を示す文は検出しない(self):
+        self.assertNotIn("instruction_residue",
+                         self.rules("この記事は、Docker を一度は使ったことがある人を対象にしています。\n"))
+
+    # pause_comma
+    def test_p2_29_短い主題のあとの読点をinfoで検出する(self):
+        text = "受付の窓口には、来月から一人増やします。\n"
+        self.assertIn("pause_comma", self.rules(text))
+        self.assertEqual(self.severities("pause_comma", text), ["info"])
+
+    def test_p2_30_長い主題の読点は検出しない(self):
+        self.assertNotIn("pause_comma", self.rules("夜のうちに届いた荷物や手紙は、朝の便でまとめて配ります。\n"))
 
 
 class TestStreamsWithoutReconfigure(unittest.TestCase):
