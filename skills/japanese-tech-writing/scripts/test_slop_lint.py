@@ -1119,6 +1119,14 @@ class TestYomiyasuV3Phase2(unittest.TestCase):
         both = dict(words, allow=("静かに壊れ", "静かに落ち"), allow_lines=2)
         self.assertNotIn("metaphor_verb", self.rules(text, both))
 
+    # 「壊れる」パターンが1行に複数あるとき、2つ目以降の「静かに壊れ」も二重反応の除外対象にする
+    def test_p2_37_同じ行の二つの静かに壊れるは二重検出しない(self):
+        text = "データが静かに壊れ、仕様が静かに壊れる。\n"
+        hits = [f for f in self.findings(text) if f["rule"] == "metaphor_verb"]
+        # 比喩動詞「壊れる」の1件だけ(英語直訳「静かに壊れる」は二重反応として出ない)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("壊れる", hits[0]["message"])
+
 
 class TestStreamsWithoutReconfigure(unittest.TestCase):
     """reconfigure() を持たない標準入出力(IDLE やプロセス内実行)でも動く"""

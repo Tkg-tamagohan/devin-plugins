@@ -3182,17 +3182,18 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
             })
 
         # 比喩動詞パターン
-        kowareru_span = None
+        # 「壊れる」が1行に複数当たるときは全ての範囲を持ち、英語直訳の一致がいずれかに含まれるとき除外する
+        kowareru_spans: tuple[tuple[int, int], ...] = ()
         for pattern, desc, required in metaphor_patterns:
             if not _may_match_literals(required, plain_text):
                 continue
-            if desc == "英語直訳「静かに壊れる (silently fail)」" and kowareru_span:
+            if desc == "英語直訳「静かに壊れる (silently fail)」" and kowareru_spans:
                 # 「Xが壊れる」と「静かに壊れる」が同一動詞に二重反応することを防止。
                 # 1行に複数当たりうるので全一致を一致ごとの並び（_word_groups）に入れ、全て許可されたときだけ外せるようにする
                 groups = []
                 for m in pattern.finditer(plain_text):
                     span = (m.start(), m.end())
-                    if kowareru_span[0] <= span[0] and span[1] <= kowareru_span[1]:
+                    if any(start <= span[0] and span[1] <= end for start, end in kowareru_spans):
                         continue
                     groups.append(_hit_words(desc, m))
                 if groups:
@@ -3211,7 +3212,7 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
             matches = list(pattern.finditer(plain_text))
             if matches:
                 if desc == "比喩動詞「壊れる」":
-                    kowareru_span = (matches[0].start(), matches[0].end())
+                    kowareru_spans = tuple((match.start(), match.end()) for match in matches)
                 groups = tuple(_hit_words(desc, m) for m in matches)
                 hit = tuple(dict.fromkeys(word for group in groups for word in group))
                 findings.append({
