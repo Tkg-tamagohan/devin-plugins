@@ -1,6 +1,6 @@
 # 決定記録
 
-実装計画 `docs/implementation-plan-yomiyasu-port.md` と `docs/implementation-plan-yomiyasu-v111-port.md` に関する確定済みの判断を記録する。
+実装計画 `docs/implementation-plan-yomiyasu-port.md`、`docs/implementation-plan-yomiyasu-v111-port.md`、`docs/implementation-plan-yomiyasu-v3-port.md` に関する確定済みの判断を記録する。
 未決の項目は計画書の「要協議」節で管理し、確定したものから順に本表へ移す。
 
 | ID | 項目 | 決定内容 |
@@ -18,3 +18,6 @@
 | Y-11 | カタログの追従範囲 | 部分導入とする。lint 採用分に対応する行は整合上必須として追加し、見送った検出(「版」「回帰」)に対応する行は入れない。lint 非対応の参照行は規範との整合を見て採用する。 |
 | Y-12 | SKILL.md への反映範囲 | 制限導入とする。採用した lint とカタログの変更に対応する主題だけを節ごとに取り込み、「Xとは:Y」見出しと議事録コロンは対象外とする。 |
 | Y-13 | リテラル絞り込み機械 | 採用する。`_PATTERN_LITERAL_HINTS`、`_narrowed_document_rows`、`_may_match_literals` を移植し、検出結果を変えずに上流構造へ揃える。 |
+| Y-14 | v3 移植計画の対象範囲 | 上流 v1.1.1 から v3.0.0 までの差分を分析対象とし、計画書を `docs/implementation-plan-yomiyasu-v3-port.md` に作成する。実装は要協議事項の確定後にフェーズ別の独立した PR で行う。 |
+| Y-15 | 絵文字検査の方式(v3) | 上流 v3.0.0 も Unicode 18.0 固定の絵文字データを内蔵するため、Y-06 の判断を継続し現行 `EMOJI_PATTERN` を維持する。 |
+| Y-16 | docs のみの変更の版管理 | 今回の計画書と決定記録の PR は `docs/` のみの変更のため、plugin-authoring の規約に対する例外として `plugin.json` の version bump を行わない。 |
