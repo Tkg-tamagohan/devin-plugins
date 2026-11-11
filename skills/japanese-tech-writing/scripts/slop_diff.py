@@ -186,13 +186,11 @@ def type_marks(sentence: str):
 
 
 def _sentence_spans(t: str):
-    """正規化した文章を文に分け、(開始, 終了) を返す。コードブロックと表の行は飛ばす。"""
-    spans, offset, in_code = [], 0, False
-    for line in t.split("\n"):
-        head = line.strip()
-        if head.startswith("```"):
-            in_code = not in_code
-        elif not in_code and head and not head.startswith("|"):
+    """正規化した文章を文に分け、(開始, 終了) を返す。コードブロック(~~~含む)と表の行は飛ばす。"""
+    kinds = {row["line"]: row["kind"] for row in analyze_markdown(t)["lines"]}
+    spans, offset = [], 0
+    for number, line in enumerate(t.split("\n"), 1):
+        if kinds.get(number) not in ("code", "table"):
             for m in _SENTENCE_PIECE.finditer(line):
                 if m.group(0).strip():
                     spans.append((offset + m.start(), offset + m.end()))
@@ -812,9 +810,8 @@ def _heading_rows(text: str):
         if not level:
             continue
         joined = "".join(row["content"] for row in block["lines"])
-        content = first["content"]
         heads.append({"line": first["line"], "level": level, "key": _heading_key(joined),
-                      "shown": _heading_text(content), "full": _heading_text(content, cut=False)})
+                      "shown": _heading_text(joined), "full": _heading_text(joined, cut=False)})
     return heads
 
 
@@ -906,9 +903,9 @@ _QUOTE_CLOSE = {"「": "」", "『": "』"}
 _COMMA_SENTENCE_PIECE = re.compile(r"(?:[^。！？!?．.\n]|\.(?![ \t]|$))+(?:[。！？!?．]+|\.+(?=[ \t]|$))?[」』）)]*")
 
 
-def _line_quote_spans(text: str):
-    """1行のかぎかっこ（「」『』）の、いちばん外側のかっこの範囲の並びを返す。
-    文の句点をまたぐ会話も1つとして取る。閉じないかっこは見ない。"""
+def _quote_spans(text: str):
+    """かぎかっこ（「」『』）の、いちばん外側のかっこの範囲の並びを返す。
+    文の句点や改行をまたぐ会話も1つとして取る。閉じないかっこは見ない。"""
     stack, tops = [], []
     for position, char in enumerate(text):
         if char in _QUOTE_CLOSE:
@@ -928,21 +925,28 @@ def _line_quote_spans(text: str):
 
 def _comma_units(text: str):
     """地の文の文ごとの読点の数。{ "line", "text", "commas" } の並びを返す。
-    コード、表、見出し、引用、HTML の行は数えない。カギ括弧の中、URL、インラインのコードの中の読点も数えない。"""
-    rows = analyze_markdown(text)["lines"]
+    段落と箇条書きの項目では、ソフト改行で折り返された行をつないでから文を区切り、各文に先頭の行番号を持たせる。
+    コード、表、見出し、引用、HTML のブロックは数えない。カギ括弧と二重カギ括弧の中、URL、インラインのコードの中の読点も数えない。"""
     units = []
-    for row in rows:
-        if row["kind"] not in _PROSE_KINDS:
+    for block in analyze_markdown(text)["blocks"]:
+        if block["kind"] not in _PROSE_KINDS:
             continue
-        content = row["content"]
-        if not content.strip():
+        parts, line_starts, line_numbers = [], [], []
+        offset = 0
+        for row in block["lines"]:
+            line_starts.append(offset)
+            line_numbers.append(row["line"])
+            parts.append(row["content"])
+            offset += len(row["content"])
+        joined = "".join(parts)
+        if not joined.strip():
             continue
-        masked = list(content)
-        for left, right, _kind in inline_protected_spans(content):
+        masked = list(joined)
+        for left, right, _kind in inline_protected_spans(joined):
             for k in range(left, right):
                 masked[k] = " "
         masked_text = "".join(masked)
-        for left, right in _line_quote_spans(masked_text):
+        for left, right in _quote_spans(masked_text):
             for k in range(left, right):
                 masked[k] = " "
         masked = "".join(masked)
@@ -950,10 +954,11 @@ def _comma_units(text: str):
             piece = match.group(0)
             if not piece.strip():
                 continue
-            display = content[match.start():match.end()].strip()
+            display = joined[match.start():match.end()].strip()
             if not display:
                 continue
-            units.append({"line": row["line"], "text": display, "commas": len(_COMMA_MARKS.findall(piece))})
+            index = max(0, bisect_right(line_starts, match.start()) - 1)
+            units.append({"line": line_numbers[index], "text": display, "commas": len(_COMMA_MARKS.findall(piece))})
     return units
 
 

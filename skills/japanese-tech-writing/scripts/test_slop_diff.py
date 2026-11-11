@@ -380,5 +380,63 @@ class TestSlopDiffStructureSections(unittest.TestCase):
         self.assertEqual(lost, ["依頼・決まり"])
 
 
+class TestSlopDiffReviewFixes(unittest.TestCase):
+    """Devin Review 指摘の修正(コード・表の除外、複数行の保護範囲、ソフト改行、複数行 setext)のリグレッション"""
+
+    def test_diff_32_チルダフェンスと先頭パイプなしの表の中の印は出さない(self):
+        for orig, rewrite in (
+                ("~~~\n原因は設定ミスだとされる。\n~~~\n", "~~~\n原因は設定ミスだ。\n~~~\n"),
+                ("```\n原因は設定ミスだとされる。\n```\n", "```\n原因は設定ミスだ。\n```\n"),
+                ("原因 | 説明\n---|---\n設定ミスだとされる | 詳細\n", "原因 | 説明\n---|---\n設定ミスだ | 詳細\n"),
+                ("| 原因 | 説明 |\n|---|---|\n| とされる | 詳細 |\n", "| 原因 | 説明 |\n|---|---|\n| だ | 詳細 |\n")):
+            with self.subTest(orig=orig):
+                self.assertEqual(slop_diff.diff(orig, rewrite)["type_changes"], [])
+        # 本文の印の変化は引き続き出す
+        found = slop_diff.diff("原因は設定ミスだとされる。\n", "原因は設定ミスだ。\n")["type_changes"]
+        self.assertEqual([mark["kind"] for entry in found for mark in entry["lost"]], ["伝聞"])
+
+    def test_diff_33_複数行の引用とインラインコードの中の読点は数えない(self):
+        for orig, rewrite in (
+                ("彼は「これは、\nあれ、それ、どれ」と言った。\n",
+                 "彼は「これは、さらに、その、うえ、\nあれ、それ、どれ、あそこ、ここ」と言った。\n"),
+                ("`code、span\ncontinues` と本文です。\n",
+                 "`code、span、a、b、c\ncontinues、d、e` と本文です。\n")):
+            with self.subTest(orig=orig):
+                self.assertIsNone(slop_diff.diff(orig, rewrite)["comma_increase"])
+        # 引用があっても本文の読点の増加は出す
+        result = slop_diff.diff("彼は「はい」と言い、設定を確認し\n実行します。\n",
+                                "彼は「はい」と言い、設定を、確認し、\n実行し、記録します。\n")
+        item = result["comma_increase"]
+        self.assertIsNotNone(item)
+        self.assertGreaterEqual(item["new_count"] - item["old_count"], 3)
+
+    def test_diff_34_段落内のソフト改行はつないで一文として数える(self):
+        result = slop_diff.diff("設定を確認し\n実行します。\n", "設定を、確認し、\n実行し、記録します。\n")
+        item = result["comma_increase"]
+        self.assertIsNotNone(item)
+        self.assertEqual((item["old_sentences"], item["new_sentences"]), (1, 1))
+        self.assertEqual(len(item["sentences"]), 1)
+        self.assertEqual(item["sentences"][0]["old"], "設定を確認し実行します。")
+        self.assertEqual(item["sentences"][0]["new"], "設定を、確認し、実行し、記録します。")
+        self.assertEqual(item["sentences"][0]["old_line"], 1)
+        # 句点で終わる別々の文は、ソフト改行でも別文のまま
+        result = slop_diff.diff("設定を確認します。\n実行します。\n", "設定を、確認し、実行します。\n実行し、記録します。\n")
+        item = result["comma_increase"]
+        self.assertIsNotNone(item)
+        self.assertEqual((item["old_sentences"], item["new_sentences"]), (2, 2))
+
+    def test_diff_35_複数行のsetext見出しは全行から表示する(self):
+        result = slop_diff.diff("見出しの1行目\n2行目は元のままです。\n===\n\n本文。\n",
+                                "見出しの1行目\n2行目は書き換えました。\n===\n\n本文。\n")
+        self.assertEqual(len(result["heading_shapes"]), 1)
+        self.assertEqual(result["heading_shapes"][0]["old"], "見出しの1行目2行目は元のままです。")
+        self.assertEqual(result["heading_shapes"][0]["new"], "見出しの1行目2行目は書き換えました。")
+        # 変わらなければ出さない
+        quiet = slop_diff.diff("見出しの1行目\n2行目は元のままです。\n===\n\n本文。\n",
+                               "見出しの1行目\n2行目は元のままです。\n===\n\n本文を直した。\n")
+        self.assertEqual(quiet["heading_shapes"], [])
+        self.assertFalse(any("見出し" in s for s in quiet["structure"]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
