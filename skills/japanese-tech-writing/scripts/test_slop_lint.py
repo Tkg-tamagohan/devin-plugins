@@ -7,7 +7,8 @@ NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準�
 V2=v1.1.1 Phase 2 の検出強化(語彙パターン、フィラー文単位化、info 文型、絞り込み)、
 V3=v1.1.1 Phase 3 のダッシュ3ルール化と否定構文強化、
 P2=yomiyasu v3.0.0 Phase 2 の info 系規則14件、
-P3=yomiyasu v3.0.0 Phase 3 の calque 型1〜3。
+P3=yomiyasu v3.0.0 Phase 3 の calque 型1〜3、
+P4=yomiyasu v3.0.0 Phase 4 の JSON 形式2・終了コード・--strict/--fail-on・通常出力。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -25,7 +26,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from slop_lint import lint_text
+from slop_lint import lint_text, _rule_penalty_score
+import slop_lint
 from markdown_bold import bold_problems
 
 
@@ -1261,6 +1263,181 @@ class TestYomiyasuV3Phase3(unittest.TestCase):
         rules = self.rules(text, allowed)
         self.assertIn("calque", rules)
         self.assertNotIn("project_term", rules)
+
+
+class TestYomiyasuV3Phase4(unittest.TestCase):
+    """yomiyasu v3.0.0 Phase 4: JSON 形式2、終了コード、--strict/--fail-on、通常出力。
+    仕様の根拠は docs/implementation-plan-yomiyasu-v3-port.md の Phase 4 と
+    docs/decision-records.md の Y-19・Y-20。"""
+
+    CLEAN = "質の高い文書を心がけます。\n"
+    INFO_ONLY = "本記事では、構成を解説します。\n"  # meta_intro(info)だけが出る
+    ERROR_TEXT = "次に**「例」**を決めます。\n"  # bold_not_rendered(error)が出る
+
+    # JSON 形式(形式2)
+
+    def test_p4_01_候補なしのJSONは形式2のキーを持ち旧キーを持たない(self):
+        result = lint_text(self.CLEAN)
+        self.assertEqual(result["format"], "yomiyasu-lint")
+        self.assertEqual(result["format_version"], 2)
+        self.assertTrue(result["tool_version"])
+        self.assertEqual(result["candidate_count"], 0)
+        self.assertEqual(result["counts"], {"error": 0, "warn": 0, "info": 0})
+        self.assertTrue(result["no_rule_findings"])
+        self.assertEqual(result["rule_penalty_score"], 100)
+        self.assertEqual(result["not_judged"], ["meaning_preservation", "reader_comprehension"])
+        self.assertEqual(result["context"], {})
+        self.assertIn("metrics", result)
+        self.assertEqual(result["findings"], [])
+        # 旧形式のキーは残さない
+        self.assertNotIn("score", result)
+        self.assertNotIn("is_clean", result)
+
+    def test_p4_02_候補ありのJSONは件数と内訳が一致する(self):
+        result = lint_text(SAMPLE)
+        self.assertEqual(result["candidate_count"], 4)
+        self.assertEqual(result["counts"], {"error": 0, "warn": 3, "info": 1})
+        self.assertFalse(result["no_rule_findings"])
+        self.assertLess(result["rule_penalty_score"], 100)
+        self.assertGreaterEqual(result["rule_penalty_score"], 1)
+        self.assertEqual(len(result["findings"]), 4)
+
+    def test_p4_03_CLIのJSON出力も形式2である(self):
+        out = io.StringIO()
+        code = run_in_process(LINT, ["--json"], stdin=io.StringIO(SAMPLE), stdout=out)
+        self.assertEqual(code, 0)
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["format_version"], 2)
+        self.assertEqual(result["candidate_count"], 4)
+        self.assertNotIn("score", result)
+
+    # rule_penalty_score
+
+    def test_p4_04_点数に入れない規則だけなら100(self):
+        # ai_phrase は上流 2.5.0 の規則で、点数を計算する前に除く
+        result = lint_text("今回の結果は、市場が回復に向かうという見立てです。\n")
+        self.assertIn("ai_phrase", [f["rule"] for f in result["findings"]])
+        self.assertEqual(result["rule_penalty_score"], 100)
+
+    def test_p4_05_ダッシュの非表示分も点数に数える(self):
+        # 表示は1文書3件までだが、点数には4件目以降も数える
+        dash3 = lint_text("A — 話。\nB — 話。\nC — 話。\n")
+        dash4 = lint_text("A — 話。\nB — 話。\nC — 話。\nD — 話。\n")
+        self.assertEqual(dash3["candidate_count"], 3)
+        self.assertEqual(dash4["candidate_count"], 3)
+        self.assertLess(dash4["rule_penalty_score"], dash3["rule_penalty_score"])
+
+    def test_p4_06_点数の式は上流と同じ(self):
+        # 上流の式: 100 × 40 ÷ (40 + x) を丸める。x は行の候補の重みを地の文1,000字あたりに
+        # 直した数。warn 1件・地の文1,000字なら x=2 で 100×40÷42≒95.2 → 95
+        finding = {"rule": "metaphor_verb", "line": 1, "severity": "warn",
+                   "message": "", "snippet": ""}
+        self.assertEqual(_rule_penalty_score([finding], 1000, 0), 95)
+        # 候補がなければ100、文書が短くても分母は1,000字として割る
+        self.assertEqual(_rule_penalty_score([], 100, 0), 100)
+
+    # 終了コードと --strict/--fail-on
+
+    def test_p4_07_strictはwarnかerrorで1でinfoだけなら0(self):
+        self.assertEqual(run_in_process(LINT, ["--strict"], stdin=io.StringIO(SAMPLE), stdout=io.StringIO()), 1)
+        self.assertEqual(run_in_process(LINT, ["--strict"], stdin=io.StringIO(self.INFO_ONLY), stdout=io.StringIO()), 0)
+        self.assertEqual(run_in_process(LINT, ["--strict"], stdin=io.StringIO(self.CLEAN), stdout=io.StringIO()), 0)
+
+    def test_p4_08_fail_onは指定した重さの候補で1になる(self):
+        # warn のみの SAMPLE: --fail-on=error は 0、--fail-on=warn は 1
+        self.assertEqual(run_in_process(LINT, ["--fail-on=error"], stdin=io.StringIO(SAMPLE), stdout=io.StringIO()), 0)
+        self.assertEqual(run_in_process(LINT, ["--fail-on=warn"], stdin=io.StringIO(SAMPLE), stdout=io.StringIO()), 1)
+        # error を含む文は両方で 1
+        self.assertEqual(run_in_process(LINT, ["--fail-on=error"], stdin=io.StringIO(self.ERROR_TEXT), stdout=io.StringIO()), 1)
+        self.assertEqual(run_in_process(LINT, ["--fail-on=warn"], stdin=io.StringIO(self.ERROR_TEXT), stdout=io.StringIO()), 1)
+
+    def test_p4_09_fail_onの値は大文字とカンマ区切りと繰り返しを受ける(self):
+        self.assertEqual(run_in_process(LINT, ["--fail-on=WARN,error"], stdin=io.StringIO(SAMPLE), stdout=io.StringIO()), 1)
+        self.assertEqual(run_in_process(LINT, ["--fail-on=warn", "--fail-on=error"],
+                                        stdin=io.StringIO(SAMPLE), stdout=io.StringIO()), 1)
+
+    def test_p4_10_使えないfail_onの値は終了コード2(self):
+        for value in ("info", "meaning_risk_extra"):
+            with self.subTest(value=value):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    code = run_in_process(LINT, ["--fail-on=" + value], stdin=io.StringIO(self.CLEAN), stdout=io.StringIO())
+                self.assertEqual(code, 2)
+                self.assertIn("--fail-on に使えない値です", stderr.getvalue())
+
+    def test_p4_11_meaning_riskは専用の文で終了コード2(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = run_in_process(LINT, ["--fail-on=meaning-risk"], stdin=io.StringIO(self.CLEAN), stdout=io.StringIO())
+        self.assertEqual(code, 2)
+        self.assertIn("slop_diff.py", stderr.getvalue())
+
+    def test_p4_12_条件に当たった終了コード1の行を通常出力に足す(self):
+        out = io.StringIO()
+        code = run_in_process(LINT, ["--strict"], stdin=io.StringIO(SAMPLE), stdout=out)
+        self.assertEqual(code, 1)
+        self.assertIn("終了コード1: --strict の条件", out.getvalue())
+
+    def test_p4_13_使えないオプションは終了コード2(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = run_in_process(LINT, ["--unknown-option"], stdin=io.StringIO(self.CLEAN), stdout=io.StringIO())
+        self.assertEqual(code, 2)
+
+    # 通常出力
+
+    def test_p4_14_通常出力は上流の形式で点数を出さない(self):
+        out = io.StringIO()
+        code = run_in_process(LINT, [], stdin=io.StringIO(SAMPLE), stdout=out)
+        self.assertEqual(code, 0)
+        lines = out.getvalue().split("\n")
+        self.assertEqual(lines[0], "表現・書式の検査を実行しました。")
+        self.assertEqual(lines[1], "見直し候補: 4件")
+        self.assertEqual(lines[2], "この検査では、意味の保持と読者にとっての分かりやすさは判定していません。")
+        self.assertIn("内訳: error 0件、warn 3件、info 1件", out.getvalue())
+        self.assertIn("L1 [WARN] one_sentence_per_line: ", out.getvalue())
+        self.assertIn("  > ", out.getvalue())
+        self.assertNotIn("スコア", out.getvalue())
+
+    def test_p4_15_候補なしの通常出力は見出し3行だけ(self):
+        out = io.StringIO()
+        code = run_in_process(LINT, [], stdin=io.StringIO(self.CLEAN), stdout=out)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip().split("\n"), [
+            "表現・書式の検査を実行しました。",
+            "見直し候補: 0件",
+            "この検査では、意味の保持と読者にとっての分かりやすさは判定していません。",
+        ])
+
+    # 語の一覧と内部エラー
+
+    def test_p4_16_語の一覧のcontextがJSONに入る(self):
+        words = {"path": "/x", "allow": ("手触り",), "flag": (), "allow_lines": 1, "flag_lines": 0,
+                 "allow_sha256": None, "flag_sha256": "0" * 64}
+        result = lint_text(SAMPLE, words=words)
+        self.assertIn("words", result["context"])
+        self.assertEqual(result["context"]["words"]["allow_removed"]["slop_vocabulary"], 1)
+        # allow で外れた候補は件数に入らない
+        self.assertEqual(result["candidate_count"], 3)
+
+    def test_p4_17_内部エラーは終了コード3(self):
+        stderr = io.StringIO()
+        with mock.patch.object(slop_lint, "_read_input", return_value=(SAMPLE, None)), \
+                mock.patch.object(slop_lint, "lint_text", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(stderr):
+            code = slop_lint.main(["x.md"])
+        self.assertEqual(code, 3)
+        self.assertIn("内部エラー", stderr.getvalue())
+
+    def test_p4_18_出力先が閉じられたら終了コード3(self):
+        stderr = io.StringIO()
+        with mock.patch.object(slop_lint, "_read_input", return_value=(SAMPLE, None)), \
+                mock.patch.object(slop_lint, "render_report", side_effect=BrokenPipeError), \
+                mock.patch.object(slop_lint, "_silence_stdout"), \
+                contextlib.redirect_stderr(stderr):
+            code = slop_lint.main(["x.md"])
+        self.assertEqual(code, 3)
+        self.assertIn("出力先が閉じられた", stderr.getvalue())
 
 
 class TestStreamsWithoutReconfigure(unittest.TestCase):
