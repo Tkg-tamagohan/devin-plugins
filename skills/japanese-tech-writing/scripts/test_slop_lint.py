@@ -1097,6 +1097,28 @@ class TestYomiyasuV3Phase2(unittest.TestCase):
         # 対照: 引用の外にある同じ語は検出する
         self.assertIn("project_term", self.rules("調べます。\n木の根の張り方を調べます。\n", self.WORDS))
 
+    # 許可した語と未許可の語が同じ行の同じ型に共存するとき、候補は残る(全一致が許可されたときだけ外す)
+    def test_p2_35_同じ行に許可済みと未許可の型の語があるとき候補を残す(self):
+        words = {"path": "/x", "allow": ("思考のOS",), "flag": (), "allow_lines": 1,
+                 "flag_lines": 0, "allow_sha256": None, "flag_sha256": "0" * 64}
+        text = "これは思考のOSと仕事のOSです。\n"
+        self.assertIn("slop_vocabulary", self.rules(text))
+        # 「思考のOS」だけを許可しても、未許可の「仕事のOS」が残るので候補は消えない
+        self.assertIn("slop_vocabulary", self.rules(text, words))
+        # 両方を許可すれば候補は外れる
+        both = dict(words, allow=("思考のOS", "仕事のOS"), allow_lines=2)
+        self.assertNotIn("slop_vocabulary", self.rules(text, both))
+
+    def test_p2_36_同じ行に許可済みと未許可の比喩動詞があるとき候補を残す(self):
+        words = {"path": "/x", "allow": ("静かに壊れ",), "flag": (), "allow_lines": 1,
+                 "flag_lines": 0, "allow_sha256": None, "flag_sha256": "0" * 64}
+        text = "この処理は静かに壊れ、静かに落ちることがあります。\n"
+        self.assertIn("metaphor_verb", self.rules(text))
+        # 「静かに壊れ」だけを許可しても、未許可の「静かに落ち」が残るので候補は消えない
+        self.assertIn("metaphor_verb", self.rules(text, words))
+        both = dict(words, allow=("静かに壊れ", "静かに落ち"), allow_lines=2)
+        self.assertNotIn("metaphor_verb", self.rules(text, both))
+
 
 class TestStreamsWithoutReconfigure(unittest.TestCase):
     """reconfigure() を持たない標準入出力(IDLE やプロセス内実行)でも動く"""

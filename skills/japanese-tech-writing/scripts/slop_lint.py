@@ -2863,6 +2863,18 @@ def _hit_words(label: str, match: re.Match[str] | None) -> tuple[str, ...]:
     return tuple(words)
 
 
+def _hit_words_all(label: str, pattern, text: str) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]] | None:
+    """pattern の text での全一致について、(平らに重ねた _words, 一致ごとの _words) を返す。当たらなければ None。
+
+    1行に同じ規則の候補は1件までだが、allow.txt で外すかは一致ごとに決めるため、
+    一致ごとの語の並び（_word_groups）も一緒に返す。"""
+    groups = tuple(_hit_words(label, match) for match in re.finditer(pattern, text))
+    if not groups:
+        return None
+    flat = tuple(dict.fromkeys(word for group in groups for word in group))
+    return flat, groups
+
+
 def _apply_words(findings: list[dict], words: dict | None) -> tuple[list[dict], dict | None]:
     """語の一覧の allow.txt の語で候補を外す。(残った候補, context に入れる words の値か None) を返す。
 
@@ -2884,6 +2896,15 @@ def _apply_words(findings: list[dict], words: dict | None) -> tuple[list[dict], 
                 # flag-patterns.txt のパターンは、名前が allow にあるか、その行で当たった文字列がどれも allow にあれば外す
                 allowed = allow | frozenset(name for name, strings in finding["_pattern_matches"].items()
                                             if all(string in allow for string in strings))
+            groups = finding.get("_word_groups")
+            if groups is not None and finding["rule"] in removed:
+                # 行に同じ規則の一致が複数ある候補は、一致ごとの語のどれかが許可されていればその一致は許可とし、
+                # 全ての一致が許可されたときだけ候補を外す（未許可の一致が残れば候補を残す）
+                if all(any(word in allowed for word in group) for group in groups):
+                    removed[finding["rule"]] += 1
+                else:
+                    kept.append(finding)
+                continue
             if finding["rule"] in removed and any(word in allowed for word in hit):
                 rest = tuple(word for word in hit if word not in allowed)
                 if finding["rule"] in _ALLOW_PARTIAL_RULES and rest:
@@ -3132,25 +3153,32 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
                 })
 
         # スロップ語彙
-        # 語の一覧の allow.txt で外すため、候補の内部の欄 _words に当たった語（型の語は、型の名前と当たった文字列）を入れる
-        slop_hits: list[tuple[str, tuple[str, ...]]]
+        # 語の一覧の allow.txt で外すため、候補の内部の欄 _words に当たった語（型の語は、型の名前と当たった文字列）を入れる。
+        # 型の語は1行に複数当たりうるので、全一致を一致ごとの並び（_word_groups）にも入れ、全て許可されたときだけ外せるようにする
+        slop_hits: list[tuple[str, tuple[str, ...], tuple[tuple[str, ...], ...] | None]]
         if narrowed is None:
-            slop_hits = [(word, (word,)) for word in SLOP_WORDS if word in plain_text]
-            slop_hits += [(word, _hit_words(word, match)) for word, match in
-                          ((word, re.search(pattern, plain_text)) for word, pattern in SLOP_WORD_PATTERNS) if match]
+            slop_hits = [(word, (word,), None) for word in SLOP_WORDS if word in plain_text]
+            for word, pattern in SLOP_WORD_PATTERNS:
+                hit_groups = _hit_words_all(word, pattern, plain_text)
+                if hit_groups:
+                    slop_hits.append((word, hit_groups[0], hit_groups[1]))
         else:
-            slop_hits = [(word, (word,)) for word in slop_words if word in plain_text]
-            slop_hits += [(word, _hit_words(word, match)) for word, match in
-                          ((word, re.search(pattern, plain_text) if _may_match_literals(required, plain_text) else None)
-                           for word, pattern, required in slop_patterns) if match]
-        for word, hit in slop_hits:
+            slop_hits = [(word, (word,), None) for word in slop_words if word in plain_text]
+            for word, pattern, required in slop_patterns:
+                if not _may_match_literals(required, plain_text):
+                    continue
+                hit_groups = _hit_words_all(word, pattern, plain_text)
+                if hit_groups:
+                    slop_hits.append((word, hit_groups[0], hit_groups[1]))
+        for word, hit, groups in slop_hits:
             findings.append({
                 "rule": "slop_vocabulary",
                 "line": line_no,
                 "severity": "warn",
                 "message": f"AI 頻出語彙「{word}」が含まれています。文脈上必要のない比喩や大げさな装飾であれば、具体的な客観表現に置き換えてください。",
                 "snippet": line.strip(),
-                "_words": hit
+                "_words": hit,
+                "_word_groups": groups,
             })
 
         # 比喩動詞パターン
@@ -3159,33 +3187,41 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
             if not _may_match_literals(required, plain_text):
                 continue
             if desc == "英語直訳「静かに壊れる (silently fail)」" and kowareru_span:
-                # 「Xが壊れる」と「静かに壊れる」が同一動詞に二重反応することを防止
+                # 「Xが壊れる」と「静かに壊れる」が同一動詞に二重反応することを防止。
+                # 1行に複数当たりうるので全一致を一致ごとの並び（_word_groups）に入れ、全て許可されたときだけ外せるようにする
+                groups = []
                 for m in pattern.finditer(plain_text):
                     span = (m.start(), m.end())
                     if kowareru_span[0] <= span[0] and span[1] <= kowareru_span[1]:
                         continue
+                    groups.append(_hit_words(desc, m))
+                if groups:
+                    hit = tuple(dict.fromkeys(word for group in groups for word in group))
                     findings.append({
                         "rule": "metaphor_verb",
                         "line": line_no,
                         "severity": "warn",
                         "message": f"{desc}が検出されました。具体的な操作や状態変化に書き直してください。",
                         "snippet": line.strip(),
-                        "_words": _hit_words(desc, m)
+                        "_words": hit,
+                        "_word_groups": tuple(groups)
                     })
-                    break
                 continue
 
-            m = pattern.search(plain_text)
-            if m:
+            matches = list(pattern.finditer(plain_text))
+            if matches:
                 if desc == "比喩動詞「壊れる」":
-                    kowareru_span = (m.start(), m.end())
+                    kowareru_span = (matches[0].start(), matches[0].end())
+                groups = tuple(_hit_words(desc, m) for m in matches)
+                hit = tuple(dict.fromkeys(word for group in groups for word in group))
                 findings.append({
                     "rule": "metaphor_verb",
                     "line": line_no,
                     "severity": "warn",
                     "message": f"{desc}が検出されました。具体的な操作や状態変化に書き直してください。",
                     "snippet": line.strip(),
-                    "_words": _hit_words(desc, m)
+                    "_words": hit,
+                    "_word_groups": groups
                 })
 
         # フィラーパターン(文ごとに見て、同じ型は1行1件)
