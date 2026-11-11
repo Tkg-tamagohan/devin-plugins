@@ -55,7 +55,8 @@ from typing import List, Dict, Any, Tuple, Optional
 try:
     from markdown_bold import bold_problems, _bold_problems_with_analysis
     from markdown_visibility import (
-        analyze_markdown, line_visible_text, range_overlaps_protected,
+        analyze_markdown, decode_source, input_path_problem,
+        line_visible_text, range_overlaps_protected,
     )
 except ModuleNotFoundError as error:
     # spec_from_file_location などで読み込まれた場合でも同ディレクトリの
@@ -77,6 +78,8 @@ except ModuleNotFoundError as error:
     _bold_problems_with_analysis = _bold_module._bold_problems_with_analysis
     _visibility_module = _load_sibling("markdown_visibility")
     analyze_markdown = _visibility_module.analyze_markdown
+    decode_source = _visibility_module.decode_source
+    input_path_problem = _visibility_module.input_path_problem
     line_visible_text = _visibility_module.line_visible_text
     range_overlaps_protected = _visibility_module.range_overlaps_protected
 
@@ -1221,34 +1224,62 @@ def lint_text(text: str) -> Dict[str, Any]:
     }
 
 
+def _path_problem(path):
+    """コマンドラインで渡されたファイルを読まないときの誤りの文か None"""
+    reason = input_path_problem(path) if path is not None else None
+    if reason is None:
+        return None
+    return "Error opening file {}: {}。このファイルを検査するときは、標準入力から渡してください（ファイルの名前の代わりに - を渡すか、省きます）".format(path, reason)
+
+
+def _read_input(path):
+    """ファイルか標準入力を読み、(文字列, None) か (None, 誤りの文) を返す"""
+    if path is not None and path != "-":
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except (OSError, ValueError) as error:
+            reason = getattr(error, "strerror", None) or error
+            return None, "Error opening file {}: ファイルを開けません（{}）".format(path, reason)
+        try:
+            return decode_source(data)[0], None
+        except UnicodeDecodeError:
+            return None, "Error opening file {}: UTF-8 として読めません".format(path)
+    stream = sys.stdin
+    if stream is None:
+        return None, "Error reading stdin: 標準入力を読めません（標準入力がありません）"
+    try:
+        buffer = getattr(stream, "buffer", None)
+        data = buffer.read() if buffer is not None else stream.read()
+    except UnicodeDecodeError:
+        return None, "Error reading stdin: UTF-8 として読めません"
+    except (OSError, ValueError) as error:
+        reason = getattr(error, "strerror", None) or error
+        return None, "Error reading stdin: 標準入力を読めません（{}）".format(reason)
+    try:
+        return decode_source(data)[0], None
+    except UnicodeDecodeError:
+        return None, "Error reading stdin: UTF-8 として読めません"
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="日本語文章の AI っぽさ機械検査リンター")
-    parser.add_argument("file", nargs="?", help="検査対象の Markdown ファイルパス(指定なしの場合は標準入力)")
+    parser.add_argument("file", nargs="?", help="検査対象の Markdown ファイルパス(指定なしまたは - の場合は標準入力)")
     parser.add_argument("--json", action="store_true", help="JSON 形式で出力")
     parser.add_argument("--strict", action="store_true", help="警告が 1 件でもあれば非ゼロ(終了コード 1)で終了")
 
     args = parser.parse_args()
 
-    if args.file:
-        try:
-            with open(args.file, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception as e:
-            print(f"Error opening file {args.file}: {e}", file=sys.stderr)
-            sys.exit(2)
-    else:
-        if sys.stdin is None:
-            print("Error reading stdin: standard input is not available", file=sys.stderr)
-            sys.exit(2)
-        if hasattr(sys.stdin, "reconfigure"):
-            sys.stdin.reconfigure(encoding="utf-8")
-        try:
-            content = sys.stdin.read()
-        except (UnicodeDecodeError, OSError) as e:
-            print(f"Error reading stdin: {e}", file=sys.stderr)
-            sys.exit(2)
+    problem = _path_problem(args.file)
+    if problem:
+        print(problem, file=sys.stderr)
+        sys.exit(2)
+    content, problem = _read_input(args.file)
+    if problem:
+        print(problem, file=sys.stderr)
+        sys.exit(2)
 
     result = lint_text(content)
 
