@@ -1031,9 +1031,9 @@ _QUOTE_MARKS = re.compile(r"[「」『』\[\]]")
 
 
 def _mask_quoted_segments_sparse(text: str) -> str:
-    """Same output as _mask_quoted_segments, but visits only the bracket marks.
+    """_mask_quoted_segments と同じ結果を、括弧の記号だけを見て返す。
 
-    Used for whole documents, where the per-character loop is the main cost.
+    文書全体に使う。文字ごとの繰り返しが主な手間なので、記号の位置だけを集めて差分で組み立てる。
     """
     closing = {"「": "」", "『": "』", "[": "]"}
     stacks = {closer: [] for closer in closing.values()}
@@ -1208,19 +1208,17 @@ _SCOPE_REFERENCE = re.compile(
 
 
 def _rule9_context(analysis: dict) -> dict[int, list[tuple[str, str]]]:
-    """New rules alone use unquoted prose and the immediately following sentence.
+    """新しい規則だけが使う、引用を伏せた地の文と、すぐ次の文。
 
-    Mask balanced quotes before splitting sentences, including paragraph breaks.
-    Retain each original line's width so the existing line numbers stay usable.
-    References cannot exempt a scope declaration across a paragraph boundary.
+    文に分ける前に、段落の区切りをまたいで対の引用を伏せる。元の行の幅を保つので、
+    既存の行番号のまま使える。参照の文は、段落をまたいだ範囲の宣言を免除しない。
     """
     rows = analysis["lines"]
     parts = [(_prose_visible_text(analysis, row["line"]).replace("__", "").replace("*", "")
               if row["kind"] in ("paragraph", "list") and not row["quote_depth"] else "")
              for row in rows]
     masked = _mask_quoted_segments_sparse("\n".join(parts))
-    # _mask_quoted_segments also masks newlines inside quotations. Slice by
-    # the original widths instead of splitting its output on newlines.
+    # _mask_quoted_segments_sparse は引用の中の改行も伏せる。出力を改行で分けず、元の幅で切り出す
     offset = 0
     visible_lines = {}
     for row, part in zip(rows, parts):
@@ -1249,7 +1247,7 @@ def _has_instruction_residue(sentence: str, following: str) -> bool:
         return True
     if not (_SCOPE_EXCLUSION.search(sentence) or (writing and _WRITING_LIMIT.search(sentence))):
         return False
-    # A reader-facing scope and its adjacent reference are useful information.
+    # 読み手に向けた範囲の宣言と、そのすぐ隣の参照は有用な情報なので外さない。
     return not (_READER_SCOPE.search(sentence)
                 or _SCOPE_REFERENCE.search(sentence) or _SCOPE_REFERENCE.search(following))
 
@@ -2047,11 +2045,33 @@ def _v220_thin_match(sentence: str) -> re.Match[str] | None:
         return fallback.match(sentence) if fallback is not None else None
 
 
+def _v220_masked_lines(analysis: dict) -> dict[int, str]:
+    """行ごとの見える文字に、文書全体で対を取ったカギ括弧のマスクをかけたもの（行番号は変えない）。
+
+    「」が行をまたぐときも中身を伏せるため、引用の行を除く全行の見える文字をつないで1度だけ
+    _mask_quoted_segments_sparse を当て、元の行の幅で切り出す（_rule9_context と同じやり方）。
+    """
+    cached = analysis.get("_v220_masked_lines")
+    if cached is not None:
+        return cached
+    rows = analysis["lines"]
+    parts = [("" if row["quote_depth"]
+              else _prose_visible_text(analysis, row["line"]).replace("__", "").replace("*", ""))
+             for row in rows]
+    masked = _mask_quoted_segments_sparse("\n".join(parts))
+    # _mask_quoted_segments_sparse は引用の中の改行も伏せる。出力を改行で分けず、元の幅で切り出す
+    offset = 0
+    result = {}
+    for row, part in zip(rows, parts):
+        result[row["line"]] = masked[offset:offset + len(part)]
+        offset += len(part) + 1
+    analysis["_v220_masked_lines"] = result
+    return result
+
+
 def _v220_scan_text(analysis: dict, line_no: int) -> str:
     """新しい語の規則が見る行の文字。見える文字から、カギ括弧と引用符の中、英数字の識別子を空白にする。"""
-    visible = _prose_visible_text(analysis, line_no).replace("__", "").replace("*", "")
-    if "「" in visible or "『" in visible or "[" in visible:
-        visible = _mask_quoted_segments_sparse(visible)
+    visible = _v220_masked_lines(analysis)[line_no]
     if "“" in visible or '"' in visible or "‘" in visible:
         visible = _V220_QUOTES.sub(lambda m: " " * len(m.group()), visible)
     return _V220_IDENTIFIER.sub(lambda m: " " * len(m.group()), visible)
@@ -2797,10 +2817,10 @@ def _project_term_findings(analysis: dict, words: dict | None) -> list[dict]:
     for row in analysis["lines"]:
         if row["kind"] in ("code", "frontmatter", "html_block", "reference_definition", "quote") or row["quote_depth"]:
             continue
-        visible = _prose_visible_text(analysis, row["line"])
-        if not visible.strip():
+        # 「」が行をまたぐときも中身を伏せるため、文書全体で対を取ったマスクを使う（_v220_masked_lines）
+        masked = _v220_masked_lines(analysis)[row["line"]]
+        if not masked.strip():
             continue
-        masked = _mask_quoted_segments(visible)
         hits = () if pattern is None else tuple(dict.fromkeys(
             match.group(0) for match in pattern.finditer(masked)
             if not (flag_replacements and _in_replacement(masked, match, flag_replacements))))
@@ -2825,6 +2845,22 @@ def _project_term_findings(analysis: dict, words: dict | None) -> list[dict]:
                 finding["_flag_hits"] = hits
             found.append(finding)
     return found
+
+
+_LABEL_WORD = re.compile(r"「([^」]+)」")
+
+
+def _hit_words(label: str, match: re.Match[str] | None) -> tuple[str, ...]:
+    """候補の内部の欄 _words の値。message に出る規則の表の語（label。「」があればその中身）、そこから「〜」と
+    英語の注記を除いた語、当たった文字列（前後の空白を除く）を、重ねずにこの順で並べる。"""
+    words = []
+    quoted = _LABEL_WORD.search(label)
+    shown = quoted.group(1) if quoted else label
+    name = re.sub(r"[ 　]*[（(][^）)]*[）)]$", "", shown).strip("〜~ 　")
+    for word in (shown, name, match.group(0).strip() if match is not None else ""):
+        if word and word not in words:
+            words.append(word)
+    return tuple(words)
 
 
 def _apply_words(findings: list[dict], words: dict | None) -> tuple[list[dict], dict | None]:
@@ -3096,20 +3132,25 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
                 })
 
         # スロップ語彙
+        # 語の一覧の allow.txt で外すため、候補の内部の欄 _words に当たった語（型の語は、型の名前と当たった文字列）を入れる
+        slop_hits: list[tuple[str, tuple[str, ...]]]
         if narrowed is None:
-            slop_hits = [word for word in SLOP_WORDS if word in plain_text]
-            slop_hits += [word for word, pattern in SLOP_WORD_PATTERNS if re.search(pattern, plain_text)]
+            slop_hits = [(word, (word,)) for word in SLOP_WORDS if word in plain_text]
+            slop_hits += [(word, _hit_words(word, match)) for word, match in
+                          ((word, re.search(pattern, plain_text)) for word, pattern in SLOP_WORD_PATTERNS) if match]
         else:
-            slop_hits = [word for word in slop_words if word in plain_text]
-            slop_hits += [word for word, pattern, required in slop_patterns
-                          if _may_match_literals(required, plain_text) and re.search(pattern, plain_text)]
-        for word in slop_hits:
+            slop_hits = [(word, (word,)) for word in slop_words if word in plain_text]
+            slop_hits += [(word, _hit_words(word, match)) for word, match in
+                          ((word, re.search(pattern, plain_text) if _may_match_literals(required, plain_text) else None)
+                           for word, pattern, required in slop_patterns) if match]
+        for word, hit in slop_hits:
             findings.append({
                 "rule": "slop_vocabulary",
                 "line": line_no,
                 "severity": "warn",
                 "message": f"AI 頻出語彙「{word}」が含まれています。文脈上必要のない比喩や大げさな装飾であれば、具体的な客観表現に置き換えてください。",
-                "snippet": line.strip()
+                "snippet": line.strip(),
+                "_words": hit
             })
 
         # 比喩動詞パターン
@@ -3128,7 +3169,8 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
                         "line": line_no,
                         "severity": "warn",
                         "message": f"{desc}が検出されました。具体的な操作や状態変化に書き直してください。",
-                        "snippet": line.strip()
+                        "snippet": line.strip(),
+                        "_words": _hit_words(desc, m)
                     })
                     break
                 continue
@@ -3142,7 +3184,8 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
                     "line": line_no,
                     "severity": "warn",
                     "message": f"{desc}が検出されました。具体的な操作や状態変化に書き直してください。",
-                    "snippet": line.strip()
+                    "snippet": line.strip(),
+                    "_words": _hit_words(desc, m)
                 })
 
         # フィラーパターン(文ごとに見て、同じ型は1行1件)

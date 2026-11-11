@@ -1064,6 +1064,39 @@ class TestYomiyasuV3Phase2(unittest.TestCase):
     def test_p2_30_長い主題の読点は検出しない(self):
         self.assertNotIn("pause_comma", self.rules("夜のうちに届いた荷物や手紙は、朝の便でまとめて配ります。\n"))
 
+    # 語の一覧の allow.txt は既存の規則の候補も外せる(候補の内部の欄 _words で照合する)
+    def test_p2_31_allowの語で比喩動詞の候補を外す(self):
+        words = {"path": "/x", "allow": ("静かに壊れる",), "flag": (), "allow_lines": 1,
+                 "flag_lines": 0, "allow_sha256": None, "flag_sha256": "0" * 64}
+        text = "この処理は静かに壊れることがあります。\n"
+        self.assertIn("metaphor_verb", self.rules(text))
+        self.assertNotIn("metaphor_verb", self.rules(text, words))
+
+    def test_p2_32_allowの語でスロップ語彙の候補を外す(self):
+        words = {"path": "/x", "allow": ("体温", "思考のOS"), "flag": (), "allow_lines": 2,
+                 "flag_lines": 0, "allow_sha256": None, "flag_sha256": "0" * 64}
+        # 語そのものの候補と、型の語(〜のOS)の候補の両方が外れる
+        self.assertIn("slop_vocabulary", self.rules("体温を測ります。\n"))
+        self.assertNotIn("slop_vocabulary", self.rules("体温を測ります。\n", words))
+        self.assertIn("slop_vocabulary", self.rules("これは思考のOSです。\n"))
+        self.assertNotIn("slop_vocabulary", self.rules("これは思考のOSです。\n", words))
+        # 語の一部(「OS」)では外れない
+        partial = dict(words, allow=("OS",), allow_lines=1)
+        self.assertIn("slop_vocabulary", self.rules("これは思考のOSです。\n", partial))
+
+    # 「」が行をまたぐときも、対になった中身は引用として伏せる
+    def test_p2_33_複数行のカギ括弧の中は検出しない(self):
+        text = "次の言い回しは使いません。\n「エンゲージメント\nを高める手法」は旧来の表現です。\n"
+        self.assertNotIn("katakana_term", self.rules(text))
+        # 対照: 引用の外にある同じ語は検出する
+        self.assertIn("katakana_term", self.rules("エンゲージメントを高める手法を使います。\n"))
+
+    def test_p2_34_複数行のカギ括弧の中のflag語は検出しない(self):
+        text = "調べます。\n「木の根の\n張り方」は例です。\n"
+        self.assertNotIn("project_term", self.rules(text, self.WORDS))
+        # 対照: 引用の外にある同じ語は検出する
+        self.assertIn("project_term", self.rules("調べます。\n木の根の張り方を調べます。\n", self.WORDS))
+
 
 class TestStreamsWithoutReconfigure(unittest.TestCase):
     """reconfigure() を持たない標準入出力(IDLE やプロセス内実行)でも動く"""
