@@ -4203,7 +4203,7 @@ _FAIL_CONDITIONS = {
 }
 _MEANING_RISK_MESSAGE = (
     "--fail-on=meaning-risk は lint では使えません。lint は1つの文章だけを見るので、意味の変化は判定できません。"
-    "原文と比べる slop_diff.py に付けてください。"
+    "意味リスクの判定は別計画で、現在はどのコマンドでも使えません。"
 )
 _PENALTY_HELP = """rule_penalty_score（--json の目安）:
   候補が0件なら100。候補があれば 100 × 40 ÷ (40 + x) を四捨五入し、1〜99に収めます。
@@ -4253,8 +4253,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="指定した中身の候補があれば、終了コード1で終わります。"
                              "warn: warn か error の候補。error: error の候補(太字が表示されない書き方)。"
                              "何度でも、カンマ区切りでも指定できます。点数は条件に使えません。"
-                             "meaning-risk は2つの文章を比べないと判定できないので、"
-                             "slop_diff.py に付けてください。")
+                             "meaning-risk は意味リスクの判定が別計画のため lint では使えません。")
     parser.set_defaults(conditions=[])
     return parser
 

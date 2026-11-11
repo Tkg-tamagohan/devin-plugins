@@ -1370,7 +1370,9 @@ class TestYomiyasuV3Phase4(unittest.TestCase):
         with contextlib.redirect_stderr(stderr):
             code = run_in_process(LINT, ["--fail-on=meaning-risk"], stdin=io.StringIO(self.CLEAN), stdout=io.StringIO())
         self.assertEqual(code, 2)
-        self.assertIn("slop_diff.py", stderr.getvalue())
+        self.assertIn("--fail-on=meaning-risk は lint では使えません", stderr.getvalue())
+        self.assertIn("別計画", stderr.getvalue())
+        self.assertNotIn("slop_diff.py", stderr.getvalue())
 
     def test_p4_12_条件に当たった終了コード1の行を通常出力に足す(self):
         out = io.StringIO()

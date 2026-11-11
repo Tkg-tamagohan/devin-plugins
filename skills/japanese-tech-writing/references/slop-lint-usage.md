@@ -13,7 +13,7 @@
 - `--strict` は warn か error の候補が1件でもあれば終了コード1で終わる。
 - `--fail-on` は指定した重さの候補があれば終了コード1で終わる。
 - `--fail-on` には `warn`(warn か error の候補)と `error` を、カンマ区切りまたは繰り返しで指定できる。
-- `meaning-risk` は2つの文章を比べないと判定できないため lint では使えず、`slop_diff.py` に付ける。
+- `meaning-risk` は意味リスクの判定が別計画のため lint では使えない(判定には2つの文章の比較が必要で、現在はどのコマンドでも使えない)。
 - 点数(`rule_penalty_score`)は `--strict` と `--fail-on` の条件に使えない。
 
 終了コードの意味は次のとおり。
