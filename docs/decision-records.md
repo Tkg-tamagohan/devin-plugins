@@ -21,3 +21,11 @@
 | Y-14 | v3 移植計画の対象範囲 | 上流 v1.1.1 から v3.0.0 までの差分を分析対象とし、計画書を `docs/implementation-plan-yomiyasu-v3-port.md` に作成する。実装は要協議事項の確定後にフェーズ別の独立した PR で行う。 |
 | Y-15 | 絵文字検査の方式(v3) | 上流 v3.0.0 も Unicode 18.0 固定の絵文字データを内蔵するため、Y-06 の判断を継続し現行 `EMOJI_PATTERN` を維持する。 |
 | Y-16 | docs のみの変更の版管理 | CI の version-base チェック(`check_plugin.py --version-base`)は docs のみの変更でも plugin.json の version 差分を必須とするため、パッチバンプを行う。 |
+| Y-17 | yomiyasu_check.py と yomiyasu_hook.py の移植 | 移植しない。状態記録と verify の仕組みは上流の対話的な推敲フローを前提としており、Devin スキルの運用とは目的が異なる。フックは Claude Code 固有で Devin には適用できない。 |
+| Y-18 | .yomiyasu-words/ 語彙リスト機構 | 採用する。`markdown_visibility.py` の同期に伴い `allow.txt`、`flag.txt`、`flag-patterns.txt` を一体で取り込む。既定ファイルは同梱し、文書への記載は最小限とする。 |
+| Y-19 | lint の JSON 形式と通常出力 | 上流 v2 形式へ更新する。`format_version` で形式を判別でき、CI は `--strict` のみを使い JSON 出力に依存しない。`score` の廃止と終了コードの再定義は上流と揃える。 |
+| Y-20 | --doc-type/--reader オプション | 導入しない。移植版 SKILL.md は文書種別を区別する運用を持たず、種別ごとの規則差分の効果が未検証のため。`calque` 型4 と `slide_comma` は doc-type 依存のため保留または info のみの常時検出とする。 |
+| Y-21 | calque 型4、translated_term、heading_colon | Y-08 の見送りを継続する。「版」「印」「頭」の calque 型4、`translated_term`、`heading_colon` は採用せず、`calque` 型1〜3 のみ採用する。 |
+| Y-22 | slop_diff の拡張範囲 | 段階的に移植する。まず v1.1.2 の文の種類の印と軽量な構造節(見出し、読点増加)を移植し、`meaning_risks` 全体系は別計画とする。 |
+| Y-23 | SKILL.md の更新方針 | 部分反映とする。採用した規則に対応する主題だけを現行 SKILL.md の構成に沿って取り込み、上流 v3.0.0 の全面書き直しは採用しない(Y-01/Y-12 の方針継続)。 |
+| Y-24 | references/ 新規ファイルの同梱範囲 | 採用規則が依存するもののみ同梱する。`calques.md` は calque 採用時、`lists/*.txt` は対応規則採用時に置く。`fact-recovery`、`persona`、`rephrase-test`、`audience`、`doc-types` は見送る。 |
