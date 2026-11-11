@@ -20,4 +20,4 @@
 | Y-13 | リテラル絞り込み機械 | 採用する。`_PATTERN_LITERAL_HINTS`、`_narrowed_document_rows`、`_may_match_literals` を移植し、検出結果を変えずに上流構造へ揃える。 |
 | Y-14 | v3 移植計画の対象範囲 | 上流 v1.1.1 から v3.0.0 までの差分を分析対象とし、計画書を `docs/implementation-plan-yomiyasu-v3-port.md` に作成する。実装は要協議事項の確定後にフェーズ別の独立した PR で行う。 |
 | Y-15 | 絵文字検査の方式(v3) | 上流 v3.0.0 も Unicode 18.0 固定の絵文字データを内蔵するため、Y-06 の判断を継続し現行 `EMOJI_PATTERN` を維持する。 |
-| Y-16 | docs のみの変更の版管理 | 今回の計画書と決定記録の PR は `docs/` のみの変更のため、plugin-authoring の規約に対する例外として `plugin.json` の version bump を行わない。 |
+| Y-16 | docs のみの変更の版管理 | CI の version-base チェック(`check_plugin.py --version-base`)は docs のみの変更でも plugin.json の version 差分を必須とするため、パッチバンプを行う。 |
