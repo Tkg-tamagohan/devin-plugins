@@ -22,7 +22,7 @@
 | Y-15 | 絵文字検査の方式(v3) | 上流 v3.0.0 も Unicode 18.0 固定の絵文字データを内蔵するため、Y-06 の判断を継続し現行 `EMOJI_PATTERN` を維持する。 |
 | Y-16 | docs のみの変更の版管理 | CI の version-base チェック(`check_plugin.py --version-base`)は docs のみの変更でも plugin.json の version 差分を必須とするため、パッチバンプを行う。 |
 | Y-17 | yomiyasu_check.py と yomiyasu_hook.py の移植 | 移植しない。状態記録と verify の仕組みは上流の対話的な推敲フローを前提としており、Devin スキルの運用とは目的が異なる。フックは Claude Code 固有で Devin には適用できない。 |
-| Y-18 | .yomiyasu-words/ 語彙リスト機構 | 採用する。`markdown_visibility.py` の同期に伴い `allow.txt`、`flag.txt`、`flag-patterns.txt` を一体で取り込む。既定ファイルは同梱し、文書への記載は最小限とする。 |
+| Y-18 | .yomiyasu-words/ 語彙リスト機構 | 採用する。`markdown_visibility.py` の同期に伴い語彙リストの読み込み機構を取り込む。上流 v3.0.0 は既定ファイルを tracked していないため同梱ファイルはなく、文書への記載は最小限とする。 |
 | Y-19 | lint の JSON 形式と通常出力 | 上流 v2 形式へ更新する。`format_version` で形式を判別でき、CI は `--strict` のみを使い JSON 出力に依存しない。`score` の廃止と終了コードの再定義は上流と揃える。 |
 | Y-20 | --doc-type/--reader オプション | 導入しない。移植版 SKILL.md は文書種別を区別する運用を持たず、種別ごとの規則差分の効果が未検証のため。`calque` 型4 と `slide_comma` は doc-type 依存のため保留または info のみの常時検出とする。 |
 | Y-21 | calque 型4、translated_term、heading_colon | Y-08 の見送りを継続する。「版」「印」「頭」の calque 型4、`translated_term`、`heading_colon` は採用せず、`calque` 型1〜3 のみ採用する。 |
