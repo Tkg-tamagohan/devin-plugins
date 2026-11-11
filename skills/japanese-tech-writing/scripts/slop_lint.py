@@ -22,6 +22,8 @@ yomiyasu_lint.py を基に、shared-skills:japanese-tech-writing の
   「Xが壊れる」「静かに壊れる」の同一動詞への二重反応の回避
 - 同一文末の連続検出は段落(隣接する地の文)の内側に限定する
 - 「A ではなく B」構文は上流の正確な字句走査で判定する
+- v3.0.0 追従: calque(直訳語)の型1〜3を info で検出する
+  (型4・型5と translated_term は不採用。docs/decision-records.md Y-21)
 - 太字の印(**)が表示されない書き方の検査を markdown_bold.py から
   呼び出す(上流の判定機械を共通モジュールへ切り出したもの)
 - 行ごとの正規表現走査を markdown_visibility.py の構造解析へ移行。
@@ -46,6 +48,7 @@ import sys
 import os
 import re
 import argparse
+import functools
 import json
 import unicodedata
 from bisect import bisect_right
@@ -1970,6 +1973,10 @@ _V220_TRIGGER_LITERALS = tuple((
     "背景 基準線 時間窓 上罫 下罫 左罫 右罫 偽緑 根因 生成器 検査器 飛行中 見張り 台本 "
 ).split())
 
+_V220_TYPE1_END = _V220_TRIGGER_LITERALS.index("口")
+_V220_TYPE2_END = _V220_TRIGGER_LITERALS.index("秒を取")
+_V220_TYPE3_END = _V220_TRIGGER_LITERALS.index("版")
+
 
 def _v220_literal_re(literals: Iterable[str]) -> _V220Lazy:
     """文字列のどれかに当たる正規表現。先頭の字ごとにまとめる（re は分かれ道を1つずつ試すので、同じ字で始まる語を
@@ -2159,17 +2166,641 @@ def _metaphor_label(analysis: dict, row: dict, scan: str) -> str | None:
     return label
 
 
-# 型4（2.4.0）: 英語の短い術語（version、mark、head）に漢字1字を当てて名詞に使う言い方（今回の版、lint の印、一覧の頭）。
-# 漢字1字の語は文字どおりの意味でもよく使うので、語ごとに形と文の条件を決めた（人のニュース約900万字で0件になる形）。
-# 版: 連体の修飾（〜た、〜い、〜な、〜る、〜の、同じ）を受けて名詞として使う形と、「版ごと」「版の文字列」「版を分ける」の形。
-#     文に出版物の語（_PUBLICATION_WORDS と、版画、印刷、新聞、映画、吹き替え など）があれば出さない（第2版、吹き替え版）。
-# 印: 1字で使う印（×印、目印、焼き印、お印は外す）。文に検査や推敲の語（lint、diff、検証、ログ、推敲 など）があるときだけ出す。
-# 頭: 行、一覧、出力、ログなどの「頭」（先頭の意味）と、PR やブランチの「頭」（HEAD）。体や慣用の頭（頭が痛い、曲の頭）は形で外れる。
-def _v220_word_findings(analysis: dict) -> list[dict]:
-    """metaphor_label、katakana_term、thin_evaluation の候補。
+# calque（直訳語）: 型1〜3（上流 v3.0.0 の採用分。型4・型5 と translated_term は決定記録 Y-21 で不採用）。
+# info で、1行に同じ規則の候補は1件まで。当たった言い方は候補の内部の欄 _words（と型の対応 _word_types）に入れる
+# （語の一覧の allow.txt で外すため。出力には出ない）。行の見え方は _v220_word_findings と同じ（_v220_scan_text）。
+# 同じ行に metaphor_verb の候補があれば出さない。上流は同じ行の translated_term があれば型3も外すが、
+# translated_term は不採用なのでその判定はない。doc-type 依存の扱い（入口と出口、「全〇〇に響く」、
+# 「ときに効く」の拾い方）は、--doc-type を導入せず（Y-20）、文書全体の技術語の数で決める内部の目安
+# _v220_doc_tech で常に判定する。
+_CALQUE_TYPE_NAMES = {1: "型1: 機械やシステムが人の動作をする言い方",
+                      2: "型2: 実物の名前の代わりに場所のたとえを使う名詞",
+                      3: "型3: 英語の言い方を一語ずつ写した句"}
+# 型1: 機械やシステムが主語の文（主語の語に「は」「が」「も」「こそ」が付く）で、人や物の動作の動詞を使う形。
+# 主語の語のあとに漢字やカタカナが続いて人や組織の語で終わるとき（サーバー管理者、情報システム部）は主語にしない。
+_CALQUE_SUBJECTS = tuple((
+    "ジョブ 処理 バッチ サーバー サーバ システム API 関数 スクリプト キュー ワーカー "
+    "プロセス モジュール 設定 鍵 ミドルウェア クライアント ビルド エージェント フック クエリ "
+    "チェック インデックス キャッシュ ライブラリ プログラム アプリ サービス ツール コマンド "
+    "パイプライン ルーター ロードバランサー ゲートウェイ プロキシ データベース DB Webhook ボット "
+    "クローラー スケジューラー コンテナ ノード クラスター センサー 端末 デバイス 機器 装置 "
+    "受信側 送信側 監視 ファイアウォール フィルター パーサー コンパイラ リンター エンジン ブラウザ "
+    "プラグイン 拡張機能 バックエンド フロントエンド テスト 体重計 計測器 cron CI "
+).split())
+_CALQUE_PERSON_END = r"(?:者|員|人|さん|様|さま|氏|チーム|部|課|室|班|係|担当|会社|社|陣|部門|部署)"
+_CALQUE_SUBJECT_WORD = _V220Lazy(r"(?<![A-Za-z])(?:" + "|".join(sorted(map(re.escape, _CALQUE_SUBJECTS), key=len, reverse=True))
+                                  + r")")
+_CALQUE_SUBJECT_EXT = 6           # 主語の語のあとに続いてよい漢字、カタカナ、英数字の数（再送ジョブ管理画面が）
+_CALQUE_SUBJECT_PARTICLES = ("こそ", "は", "が", "も")
+_CALQUE_PERSON_SUBJECT = _V220Lazy(
+    r"(?:" + _CALQUE_PERSON_END[3:-1] + r"|私|僕|わたし|ぼく|我々|皆さん|みなさん|お客様|彼|彼女|あなた)(?:は|が|も|こそ)")
+_CALQUE_PERSON_EXT = _V220Lazy(_CALQUE_PERSON_END + r"$")
+# (辞書の形, 正規表現)。活用の形まで書き、名詞の使い方（引き続き、通りに、足し算、食い違い）は外す。
+# 動詞の漢字の前が漢字のとき（不足して、共通する、電話します、補足すると）は、_calque_type1 が外す（_CALQUE_COMPOUND_OK の動詞を除く）
+_CALQUE_VERBS = (
+    ("拾う", r"拾(?:う|い|わ|っ[てた]|え|お)"),
+    ("引き込む", r"引き込(?:む|み|ん|ま|め)"),
+    ("引く", r"(?<!差し)引(?:く|い[てた]|か(?:な|ず|れ)|き(?=[ぁ-ん])|け(?=[ぁ-ん]))"),
+    ("通す", r"(?<!を)通(?:す|し(?=[ぁ-ん])|さ(?:な|ず|せ))"),
+    ("通る", r"通(?:る|り(?=[ぁ-ん])(?![にのだでがはをもと])|ら(?:な|ず)|っ[てた]|れ(?=[ぁ-ん]))"),
+    ("効く", r"効(?:く|き(?=[ぁ-ん])|か(?:な|ず)|い[てた]|け(?=[ぁ-ん]))"),
+    ("響く", r"響(?:く|き(?=[ぁ-ん])|か(?:な|ず)|い[てた]|け(?=[ぁ-ん]))"),
+    ("足す", r"足(?:す|し(?=[ぁ-ん])|さ(?:な|ず|れ)|せ(?=[ぁ-ん]))"),
+    ("抱える", r"抱え(?:る|て|た|ま|な|ず|込)"),
+    ("見張る", r"見張(?:る|り|っ[てた]|ら|れ)"),
+    ("食う", r"食(?:う|い(?=[ぁ-ん])|わ(?:な|ず|れ)|っ[てた])|食べ(?:る|て|た|ま|な|ず|られ)"),
+    ("受け止める", r"受け止め"),
+    ("飲み込む", r"[飲呑]み込(?:む|み|ん|め|ま)"),
+    ("覚える", r"覚え(?:る|て|た|ま|な|ず|させ|られ)"),
+    ("忘れる", r"忘れ(?:る|て|た|ま|な|ず|られ)"),
+    ("投げる", r"投げ(?:る|て|た|ま|な|ず|込|つけ|られ)"),
+    ("叩く", r"叩(?:く|き(?=[ぁ-ん])|か(?:な|ず|れ)|い[てた])"),
+    ("話す", r"話(?:す|し(?=[ぁ-ん])|さ(?:な|ず)|せ(?=[ぁ-ん]))"),
+    ("喋る", r"喋(?:る|り|ら|っ[てた]|れ)"),
+    ("助ける", r"助け(?:る|て|た|ま|な|ず|られ)"),
+    ("手伝う", r"手伝(?:う|い|わ|っ[てた]|え)"),
+    ("気にする", r"気に(?:す|し|せ|さ)"),
+    ("怒る", r"怒(?:る|り(?=ま)|ら|っ[てた])"),
+    ("文句を言う", r"文句を(?:言|い)"),
+)
+# 前が漢字でもよい動詞（引き込む、抱える、見張る など、漢字の熟語の一部にならない語幹）
+_CALQUE_COMPOUND_OK = ("引き込む", "抱える", "見張る", "受け止める", "飲み込む", "覚える", "忘れる", "投げる", "喋る", "助ける",
+                       "手伝う", "文句を言う")
+# 動詞ごとの (語幹の字, 辞書の形, 正規表現)。文に語幹の字があるときだけ、その動詞の正規表現を組んで当てる
+_CALQUE_VERB_EACH = tuple((re.sub(r"^(?:\(\?<![^)]*\))*(?:\[[^\]]*\])?", "", pattern)[0], name, _V220Lazy(pattern))
+                          for name, pattern in _CALQUE_VERBS)
+# 定着した言い方（テストが通る、キャッシュが効く）の助詞と動詞の間に入れてよい副詞。どの主語の行でも同じ一覧を使う。
+# 副詞は2つまで続いてよく、助詞と副詞のあとの読点も許す（テストが、まだ通らない。CIはもう全部通りました）。
+# 型1の見落としを増やさないよう、語の完全一致にして、任意の字の並びにはしない
+_CALQUE_ESTABLISHED_ADVERBS = ("すべて", "全部", "全て", "無事に", "無事", "まだ", "もう", "ちゃんと", "きちんと", "しっかり",
+                               "うまく", "よく", "正しく", "問題なく", "なかなか", "いつも", "必ず", "全然", "一度で", "最後まで")
+_CALQUE_ESTABLISHED_ADVERB = (r"、?(?:(?:" + "|".join(sorted(_CALQUE_ESTABLISHED_ADVERBS, key=len, reverse=True))
+                              + r")、?){0,2}")
+# 型1の定着した言い方（試験で守る）。動詞がこの当たりの中にあれば出さない。
+# 動詞が名詞を修飾する形（拾った通知、話した内容）は、主語が機械と決まらないので出さない
+_CALQUE_ESTABLISHED_TYPE1 = (
+    r"テスト(?:が|は|も)" + _CALQUE_ESTABLISHED_ADVERB + r"通",
+    # 件数や一式、道具の名前をはさむ形（テストは218件とも通りました、テスト一式は pytest で通す）
+    r"テスト(?:一式)?[0-9０-９]*件?(?:が|は|も)(?:[0-9０-９]+件(?:とも|すべて)?|\s?[A-Za-z][\w.-]{0,15}\s?で)?"
+    + _CALQUE_ESTABLISHED_ADVERB + r"\s?通",
+    r"(?:ビルド|CI|コンパイル|審査|申請|予算|企画|法案|稟議|認証|筋|話|声|意見|理屈|名前|電気|電流)\s?(?:が|は|も)"
+    + _CALQUE_ESTABLISHED_ADVERB + r"通",
+    r"(?i:ping)\s*(?:が|は|も)\s*通", r"疎通",
+    r"(?:キャッシュ|インデックス|薬|ブレーキ|冷房|暖房|エアコン|設定|オプション|フラグ|権限|フック|上限)\s?(?:が|は|も)"
+    + _CALQUE_ESTABLISHED_ADVERB + r"効",
+    # 設定やフックが何に及ぶかを言う「〜にも効く」（フックは、サブエージェントの呼び出しにも効く）
+    r"(?:設定|オプション|フラグ|権限|フック|上限|ルール|規則)\s?(?:が|は|も)、?[^。]{0,30}?に(?:も)?効",
+    r"(?:声|音|ノイズ|電波|信号|振動)を拾",
+    # 検出の意味の「拾う」（表現を拾う、エラーを拾う）
+    r"(?:誤り|誤字|脱字|表現|候補|エラー|警告|違反|表記ゆれ|変更|差分)を[^。、]{0,6}拾",
+    r"から[^。、]{0,15}(?:額|数|値|分|量|費|料|金|点|[0-9０-９]+)を引(?:く|き|い|か)",
+    r"(?:線|辞書|くじ|クジ|風邪|かぜ|手|目|注意|関心|興味|気|幕|身|糸|尾|図|グラフ|罫線|下線|傍線|カーテン|ブラインド)を引",
+    r"落とし物を拾", r"(?:例外|エラー|exception|Exception)を投げ",
+    r"(?:課題|問題|負債|リスク|不安|悩み|弱点|欠陥|バグ|不具合|矛盾)を(?:多く|いくつも|たくさん)?抱え",
+)
+_CALQUE_ESTABLISHED_TYPE1_RE = _V220Lazy("|".join(_CALQUE_ESTABLISHED_TYPE1))
+_CALQUE_KANA_RUN = _V220Lazy(r"[ぁ-ん]*")
+# 主語から動詞までの字数の上限と、間にあれば主語と動詞を結ばない記号（括弧、矢印。例を並べた文）
+_CALQUE_SUBJECT_REACH = 30
+_CALQUE_SUBJECT_BREAK = _V220Lazy(r"[（()）「」『』→←]")
+_CALQUE_REQUEST = ("てください", "て下さい", "てくださ", "いでくださ", "いで下さ", "なさい", "ましょう", "てほしい", "て欲しい",
+                   "ていただ", "てもらえ")
+_CALQUE_ATTRIBUTIVE_END = ("た", "る", "う", "く", "す", "つ", "む", "ぶ", "ぐ", "だ", "ない", "いる")
+# 文ごとに、型の手掛かりの語があるかを先に見る（ない文は型の正規表現を当てない）
+_CALQUE_VERB_STEMS = frozenset(stem for stem, _, _ in _CALQUE_VERB_EACH)     # どれも1字
+_CALQUE_PLACE_HEAD = _v220_literal_re(_V220_TRIGGER_LITERALS[_V220_TYPE1_END:_V220_TYPE2_END])
+_CALQUE_PHRASE_HEAD = _v220_literal_re(_V220_TRIGGER_LITERALS[_V220_TYPE2_END:_V220_TYPE3_END] + ("効", "足す", "足し", "響", "引", "通"))
+
+# 型2: 場所のたとえの名詞。受け口と「〜向けの口」はいつも拾う。「〜先」は _CALQUE_SAKI の形で、定着した語
+# （_CALQUE_ESTABLISHED_SAKI）を除いて拾う。入口、窓口などの実物にもある名前は、同じ文に機械やシステムの語（_CALQUE_TECH）が
+# あるときだけ拾い、実物の場所（駅の入口）と組織の窓口（総務部の窓口）は外す
+# 後ろに漢字やカタカナが続く語（入口付近、窓口業務、口座）は _calque_type2 が外す。動詞のあとの「口」（トークンを出す口）は、
+# 実物の口（水を出す口、切符を受け取る口）と分けるため、機械やシステムの語がある文だけで拾う
+_CALQUE_PLACE_ALWAYS = _V220Lazy(r"受け口|(?:向け|用)の口|(?:出す|受ける|受け取る|返す|渡す|発行する)口(?=[はがをにでもへと、。]|$)")
+_CALQUE_PLACE_CONTEXT = _V220Lazy(r"(?:入り?口|出口|窓口|玄関口?|関所|関門|裏口|勝手口|抜け道|裏道|通り道|合流地点|合流点"
+                                   r"|防波堤|砦)|の口(?=[はがをにでもへと、。]|$)")
+# 実物の場所の入口（駅の入口、正面入口、2番入口）と、組織の窓口（総務部の窓口）
+_CALQUE_PLACE_REAL = _V220Lazy(
+    r"(?:駅|正面|[東西南北]|番|建物|ビル|店|会場|公園|館|門|地下|トンネル|洞窟|港|校舎|病院|施設|部屋|通用|非常|改札|階段"
+    r"|空港|ホーム|ホール|劇場|球場|庭|家|屋敷|森|山|川|村|町|街|道|高速|本館|別館|棟|フロア|階"
+    # 機械を置く部屋（サーバールーム、データセンター）。名前に技術の語があっても実物の場所
+    r"|(?:サーバー?|マシン|コンピューター?|電算|計算機)(?:ルーム|室)|データセンター)の?$")
+# 同じ文に技術の語がない入口と出口（技術の文書の判定）で、ほかに外す実物の場所（サーバールーム、北側の出口、
+# 駐車場の出口）。同じ文に技術の語がある文は、_CALQUE_PLACE_REAL だけで外す
+_CALQUE_PLACE_REAL_DOC = _V220Lazy(
+    r"(?:ルーム|室|センター|オフィス|倉庫|工場|店舗|売り場|ロビー|受付|玄関|フロント|(?:[東西南北]|正面|裏|表|反対|道路|線路)側"
+    r"|(?:駐車|駐輪|乗り|広|運動|工事)場|鉄|トイレ|学校|社屋|建屋|非常用|団地|園|マンション|通路)の?$")
+# 入口の前で人が待つ、集まる形（入口の前でお待ちください）と、入口の前の物（入口の前のインターホン）は、技術の語のない文では
+# 実物の場所として外す
+_CALQUE_ENTRY_WAIT = _V220Lazy(r"の前(?:の|(?:で|に)(?:は、?)?(?:お?待|集ま|並|立))")
+_CALQUE_PLACE_ORG = _V220Lazy(
+    r"(?:部|課|室|係|局|センター|デスク|担当|相談|問い合わせ|問合せ|受付|事務所|事務局|総合|専用|役所|役場|銀行|郵便局"
+    r"|市役所|区役所|窓口|申請|手続き|手続)の?$")
+_CALQUE_MOUTH_REAL = _V220Lazy(
+    r"(?:人|彼|彼女|私|僕|子|犬|猫|魚|鳥|瓶|びん|袋|ボトル|缶|容器|鍋|壺|樽|筒|穴|管|ホース|川|洞窟|トンネル|火山|傷|蛇)の口$")
+_CALQUE_MOUTH_IDIOM = _V220Lazy(r"口(?:に合|が(?:堅|固|軽|悪|うま|上手|重|滑|すべ|裂)|を(?:出|挟|はさ|開|ひら|閉|とざ|揃|そろ"
+                                 r"|つぐ|きく|利|割))")
+_CALQUE_TECH = _V220Lazy(
+    r"(?<![A-Za-z])(?:" + "|".join(sorted(map(re.escape, _CALQUE_SUBJECTS), key=len, reverse=True))
+    + r"|データ|URL|リクエスト|レスポンス|接続|通信|トラフィック|ログイン|認証|ポータル|ページ|画面|サイト|フォーム"
+    r"|アドレス|ポート|エンドポイント|ネットワーク|テーブル|ファイル|ログ|エラー|通知|CSV|JSON|HTTP|送信|受信|集計|決済"
+    r"|リポジトリ|コード|メソッド|クラス|インターフェース|SDK|トークン|パケット|イベント|メッセージ|ドライブ|チャンネル)")
+# 入口と出口は、同じ文に技術の語がなくても、技術の文書（_CALQUE_TECH の語のうち、案内や行事の文書にも出る語
+# （_CALQUE_DOC_TECH_GENERAL）を除いた語が5種類以上）で、入口より前に要求や呼び出しの語の主題（_CALQUE_ENTRY_SUBJECT）があり、
+# それを集めたり通したりする形（要求は、どれもこの入口を通ります）なら拾う。実物の場所（_CALQUE_PLACE_REAL と
+# _CALQUE_PLACE_REAL_DOC）は外す
+_CALQUE_DOC_TECH_MIN = 5
+_CALQUE_DOC_TECH_GENERAL = frozenset((
+    "画面 通知 メッセージ イベント サイト フォーム チャンネル ページ 送信 受信 ポータル アドレス ログイン 集計 決済 "
+    "ドライブ ファイル データ コード 設定 チェック テスト 監視 ツール サービス アプリ 端末 機器 装置 デバイス 処理 "
+    "センサー 体重計 計測器 エラー 鍵 テーブル クラス"
+).split())
+_CALQUE_ENTRY_FLOW = _V220Lazy(r"(?:の前|を通|に通|へ通|に集め|へ集め|にまとめ|へまとめ|に届|へ届|で受け|を経由|から入)")
+# 人を呼ぶ、人が要求する文（来客の呼び出しがあったら、組合の要求を受けて）は外すため、「〜は」「〜も」の主題だけを見る
+_CALQUE_ENTRY_SUBJECT = _V220Lazy(r"(?:要求|呼び出し|リクエスト|トラフィック|パケット|接続|通信)(?:は|も)")
+# 窓口は、コードの部品の語が同じ文にあり、組織の名前（総務部、情報システム課、サポートセンター）がないときだけ
+# （決済の窓口をこのモジュールに集める）
+_CALQUE_ORG_WORDS = ("センター", "デスク", "担当", "事務局")
+_CALQUE_ORG_SUFFIXES = "部課室係局班"
+_CALQUE_CODE = _V220Lazy(r"(?<![A-Za-z])(?:モジュール|関数|クラス|API|エンドポイント|サーバー|サーバ|コード|ライブラリ|メソッド"
+                          r"|インターフェース|SDK|ミドルウェア|プロキシ|ゲートウェイ)")
+# 「〜先」: 漢字1字と動詞の連用形の送り仮名（し、せ、げ など）のあとの「先」（逃がし先、寄せ先）と、場所のたとえの漢語の「先」
+# （_CALQUE_SAKI_KANJI。着地先）。漢字2字の「〜先」の多くは定着した語（保存先、接続先、修飾先）なので、一覧の語だけを拾う。
+# 後ろに漢字やカタカナが続く語（先日、先方）と、助詞や「て」のあとの「先」（何を先に、置いて先に、項より先）は除く
+_CALQUE_SAKI_KANJI = ("着地", "着弾", "漂着", "逃走", "終着", "着陸", "落下")
+_CALQUE_SAKI_TAIL = "しせげけめりちきぎびみいえねべれじ"
+# 定着した「〜先」（試験で守る）。当たった語がこのどれかで終われば出さない
+_CALQUE_ESTABLISHED_SAKI = tuple((
+    "宛先 宛て先 送信先 受信先 保存先 接続先 連絡先 取引先 依存先 問い合わせ先 問合せ先 "
+    "回し先 割り振り先 振り分け先 立ち寄り先 働き先 通い先 務め先 引き合い先 取り寄せ先 借り先 貸し先 "
+    "問合わせ先 提出先 申請先 申込先 申し込み先 照会先 相談先 通報先 報告先 連携先 格納先 "
+    "出力先 入力先 書き込み先 読み込み先 書き出し先 取り込み先 移動先 移行先 遷移先 参照先 "
+    "呼び出し先 配信先 通知先 公開先 共有先 掲載先 展開先 導入先 設置先 登録先 記録先 保管先 "
+    "退避先 返却先 回収先 引き取り先 引き継ぎ先 譲渡先 売却先 取得先 利用先 適用先 反映先 "
+    "割り当て先 割当先 代入先 転送先 送付先 返送先 請求先 支払先 支払い先 振込先 振り込み先 "
+    "入金先 送金先 投資先 融資先 寄付先 預け先 預入先 勤務先 勤め先 所属先 配属先 委託先 "
+    "外注先 発注先 受注先 仕入先 仕入れ先 購入先 調達先 供給先 納品先 納入先 出荷先 配送先 "
+    "配達先 届け先 送り先 販売先 輸出先 輸入先 取材先 派遣先 出向先 転勤先 赴任先 就職先 "
+    "転職先 進学先 留学先 旅行先 出張先 訪問先 避難先 移住先 越し先 滞在先 宿泊先 行き先 "
+    "得意先 嫁ぎ先 落ち着き先 引受先 受け入れ先 受入先 実習先 研修先 見学先 紹介先 取次先 "
+    "接種先 通院先 入院先 搬送先 転院先 飛び先 戻り先 移し先 写し先 優先 通信先 同期先 "
+    "複製先 複写先 配置先 配備先 配布先 発行先 発送先 発信先 着信先 返信先 回答先 問合先 "
+    "移転先 移設先 転居先 引越先 誘導先 案内先 相手先 顧客先 契約先 提携先 協力先 加盟先 "
+    "参加先 出資先 移籍先 異動先 転属先 採用先 応募先 投稿先 寄稿先 掲示先 提供先 供与先 "
+    "貸与先 買収先 寄贈先 支援先 返金先 引落先 引き落とし先 外出先 観光先 持参先 届出先 "
+    "表示先 書込先 読込先 待避先 復元先 復旧先 切替先 置換先 変換先 変更先 更新先 追加先 "
+    "代替先 委任先 依頼先 請負先 受託先 移管先 電話先 通話先 玄関先 納め先 戻し先 預かり先 "
+    "付け先 込み先 出し先 入れ先 渡し先 継ぎ先 替え先 換え先 向け先 扱い先 一足先 "
+    "掛かり先 係り先 掛り先 修飾先 "
+    "少し先 一つ先 二つ先 三つ先 ひとつ先 以上先 以下先 "
+).split())
+# 時や距離の「先」（数年先、一歩先、数時間先）
+_CALQUE_SAKI_TIME = _V220Lazy(r"[年月日週間時分秒歩手里キロメートル]先$|[たうくるだつむぬぶぐす]先$")
+
+# 型3 が使う「効く」の文字どおりの語の判定（上流 _KIKU_RE のうち calque 型3 が使う4つのキーだけ。
+# 残りのキーは上流の metaphor_verb の「効く」判定用で、本スキルには未移植）
+_KIKU_END = "。．！？!?"
+_KIKU_LITERAL_NEAR = (
+    # 薬と体
+    r"薬|剤|(?<=[0-9０-９数一二三四五六])錠|抗生物質|ワクチン|注射|点滴|麻酔|湿布|漢方|治療|鍼|ツボ|マッサージ|サプリメント|サプリ"
+    r"|服用|服薬|内服|接種|症状|頭痛|腰痛|肩こり|肩凝り|花粉症|風邪|二日酔い|鼻炎|乾燥肌|肌荒れ|便秘|むくみ|筋肉痛|痛み"
+    r"|日焼け止め|保湿|肥料|カフェイン|コーヒー|アルコール|酒|(?<!気の)毒"
+    # 冷房や暖房、風呂
+    r"|冷房|暖房|エアコン|クーラー|ヒーター|空調|除湿|床暖房|床暖|ストーブ|冷蔵|冷凍|扇風機|冷え|入浴|湯船|風呂|温泉"
+    # 車
+    r"|ブレーキ|制動|サスペンション|グリップ"
+    # 調味料と味
+    r"|わさび|ワサビ|山葵|塩加減|塩気|塩味|塩分|塩|胡椒|こしょう|コショウ|スパイス|辛子|カラシ|出汁|香辛料|調味料|酢"
+    r"|生姜|ショウガ|山椒|唐辛子|七味|柚子|ハーブ|ミント|にんにく|ニンニク|レモン|炭酸"
+    r"|隠し味|酸味|辛味|辛み|辛さ|甘さ|甘み|甘味|酸っぱさ|苦味|苦み|旨味|うま味|風味|香り(?!づけ|付け)|味付け|味つけ"
+    r"|(?<![一-龥々])味")
+# ソフトウェアの仕組みと設定の反映の語（と ABS）。「効く」の主語の位置（literal_subject）でだけ文字どおりとみなし、
+# 同じ文と前の行の判定（context_near）では使わない
+_KIKU_LITERAL_SOFTWARE = (r"(?<![A-Za-z])(?:ABS|JIT)|キャッシュ|インデックス|圧縮|最適化|プリフェッチ|チューニング"
+                          r"|設定の変更|設定変更")
+_KIKU_LITERAL = _KIKU_LITERAL_NEAR + "|" + _KIKU_LITERAL_SOFTWARE
+# 主語の位置でなくても、近くにあれば文字どおりとみなす語（薬の飲み方の言い方）
+_KIKU_CONTEXT = (r"飲んで|飲んだ|飲む|飲め|飲み(?:始め|はじめ|続け)|飲ませ|飲み物|飲み方|食後|食前|就寝前|用法|用量"
+                 r"|効き目は個人差|個人差")
+_KIKU_STOP = "、，，" + _KIKU_END
+_KIKU_RE = {
+    "literal_subject": _V220Lazy(r"(?:" + _KIKU_LITERAL + r")(?:(?:が|は|も|こそ|の|に|って|として)[、，,]?|[、，,])"
+                                 r"[^" + _KIKU_STOP + r"を]{0,10}$"),
+    "context": _V220Lazy(r"(?:" + _KIKU_LITERAL + r"|" + _KIKU_CONTEXT + r")(?![一-龥々ァ-ヴーA-Za-z])"),
+    # 同じ文の中で見る語（ソフトウェアの語を除く）
+    "context_near": _V220Lazy(r"(?:" + _KIKU_LITERAL_NEAR + r"|" + _KIKU_CONTEXT + r")(?![一-龥々ァ-ヴーA-Za-z])"),
+    "timing": _V220Lazy(r"(?:[0-9０-９]+|数|半)\s*(?:分|時間)(?:間)?"
+                        r"(?=ほど|くらい|ぐらい|程度|後|以内|経|たつ|たっ|で|もすると|もしないうち)"),
+}
+
+# 型3: 英語の言い方を一語ずつ写した句（試験で守る）。(名前, 正規表現)
+_CALQUE_PHRASES = (
+    ("足すものがない", r"足すもの(?:が|は|も)(?:ない|ありません|なかった|ありませんでした|何もない)"),
+    ("価値を足す", r"価値を足"),
+    ("失効が効く", r"失効が効"),
+    ("から効く", r"(?:日|月|年|週|請求|分|回|以降|翌[日月週年]|来[月週年]|明日|今日|本日|次回)から効(?:く|き(?=[ぁ-ん])|い[てた])"),
+    ("時間を取る", r"(?<![0-9０-９])[0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:ミリ秒|秒|分|時間)を取(?:る|り|っ|ら)"),
+    ("意味をなす", r"意味を(?:なす|成す|なし|成し)(?!てい?な|ませ|えな|得な)"),
+    ("針を動かす", r"針を(?:ほとんど|大きく|少し|まったく|全く|あまり)?動か"),
+    ("ステップを取る", r"ステップを取"),
+    ("所有権を持つ", r"(?:問題|課題|タスク|機能|サービス|障害|不具合|チケット|作業|プロジェクト|コード|モジュール)(?:に(?:は|ついては)|の)、?"
+                    r"[^。]{0,12}所有権を持"),
+    ("違いを作る", r"違いを作"),
+    ("手を伸ばす", r"(?:部|課|室|チーム|担当者?|窓口|サポート|事務局|私たち|弊社|当社|我々)(?:まで|に|へ)(?:お?気軽に)?手を伸ば"),
+    ("ライブになる", r"ライブに(?:な|し)"),
+    ("同じページにいる", r"同じページ(?:の上)?に(?:い|立|そろ|揃)"),
+    ("水を試す", r"水を試"),
+    ("透明に", r"(?:にとって|に対して|から見て|からは)透明に|透明に(?:行われ|動作|処理|移行|切り替|動|扱)"),
+    ("場所を取る", r"で場所を取(?:る|り|っ)"),
+    ("ループを閉じる", r"ループを閉じ"),
+    ("ループに入れる", r"ループに(?:入れ|入っ|加え)"),
+    ("駆動される", r"(?:データ|数字|数値|指標|顧客|ユーザー|利用者|テスト|仕様)に駆動され"),
+    ("配達する", r"(?:数字|数値|結果|成果|価値|売上|利益|成長|体験)を配達"),
+    ("大きな絵", r"大きな絵(?:を|が|で|の中)(?![^。]*(?:描|画家|美術|展示|額|飾))"),
+    ("インパクトを持つ", r"インパクトを持"),
+    ("決定を作る", r"決定を作"),
+    ("質問を持つ", r"質問を持(?:っ|ち|つ)"),
+    ("真剣に取る", r"真剣に取(?:る|り|っ|ら)"),
+    ("目を保つ", r"目を保"),
+    ("テーブルに置く", r"(?:案|提案|選択肢|アイデア|条件|議題)を[^。]{0,6}テーブルに(?:置|載せ|乗せ|出)"),
+    ("次のレベルに", r"次のレベルに(?:引き上げ|持っていく|押し上げ|連れて)"),
+    # 直訳語の対応表から足した形（machine-to-machine、matter、affect、pull、go through、turn）
+    ("機械どうし", r"機械(?:どうし|同士)(?:の|で|が|は|を|に)"),
+    ("ときに効く", r"(?:とき|際|場合|うえ|上)に(?:いちばん|特に|大きく|強く)?効(?:く|き(?=[ぁ-ん])|い[てた])"),
+    ("に響く", r"(?:クライアント|サーバー?|性能|応答|処理|ユーザー|利用者|ダッシュボード|システム|速度|画面|負荷|料金|費用"
+              r"|コスト|請求)(?:の[^。、]{0,6})?に(?:まで|も)?響(?:く|き|い|か)"),
+    # 間引く、差し引く、引き渡す、引き上げる、引きずる などの複合の動詞は外す
+    ("データを引く", r"(?:データ|ログ|レコード|設定|履歴)を(?:[^。、]{0,6})?(?<![間割])(?<!差し)引"
+                    r"(?:く|き(?![出継続受取渡伸上下ず合寄止戻抜締起換替])|い|か|け)"),
+    # 「通」の前が漢字の語（予定通り、手順通り、一通り、大通り）と「通りに」などは外す
+    ("書き込みが通る", r"(?:書き込み|読み込み|書き換え|削除|更新|操作|アクセス)(?:も|が|は)(?:[^。、]{0,4}[ぁ-ん])?通"
+                     r"(?:る|り(?=[ぁ-ん])(?![にのだでがはをもと])|っ|ら|れ)"),
+    # 数字の並びの途中から試さないよう、前に数字がないことを見る（長い数字の並びで遅くならない）
+    ("ターン", r"(?:毎|(?<![0-9０-９一二三])[0-9０-９一二三]+|各|次の|前の|同じ)ターン(?![ァ-ヴー])"),
+)
+# 型3の句（何が大事かを言う形、〜レベルの、テーブルの上にある）
+_CALQUE_PHRASES_V250 = (
+    # 何が大事かを言う形（what matters）。ここで効いてくるのが、そこで効くのは
+    ("ここで効くのが", r"(?:ここで|そこで|このとき|その場面で|最後に|ここから)[、，,]?効(?:く|いてくる)の(?:が|は)"),
+    # 〜レベルの（repository-level）。OS やカーネルのような層の「レベル」、レベルの高い・低い、レベル3の は外す
+    ("レベルの", r"(?:リポジトリ|プロジェクト|ワークスペース|組織|ファイル)\s?レベルの(?!高|低|差|違|向上|底上げ)"
+                r"(?=[一-龥々ァ-ヴーA-Za-z])"),
+    # テーブルの上にある（on the table）。主語が案、選択肢、提案、議題、条件の文だけ（_calque_type3 が見る）。前に名詞や「の」が
+    # ある表（users テーブル、設定テーブル、下のテーブル）は外す
+    ("テーブルにある", r"(?<![一-龥々ァ-ヴーA-Za-z0-9\s　の])テーブル(?:の上)?に(?:あ(?:る|り)|載って|乗って|載せ|乗せ)"),
+)
+_CALQUE_PHRASE = _V220Lazy("|".join("(?:{})".format(pattern) for _, pattern in _CALQUE_PHRASES + _CALQUE_PHRASES_V250))
+_CALQUE_PHRASE_EACH = tuple((name, _V220Lazy(pattern)) for name, pattern in _CALQUE_PHRASES + _CALQUE_PHRASES_V250)
+# 「〜から効く」は、薬や冷房の効き方（_KIKU_RE の文字どおりの語が同じ文にある）なら出さない
+_CALQUE_PHRASE_KIKU = "から効く"
+# 対応表から足した句と、型1の同じ動詞（型1が当てた文では句を重ねない）
+_CALQUE_PHRASE_VERB = {"ときに効く": "効く", "に響く": "響く", "データを引く": "引く", "書き込みが通る": "通る",
+                       "ここで効くのが": "効く"}
+# 「ここで効いてくるのが」は、「効く」の主語の位置に文字どおりの語があるとき（薬はここで効いてくるのが分かります）、
+# 「のが」「のは」のあとの名詞が文字どおりの語で終わる文（そこで効くのが、わさびです）、同じ文に薬や冷房の語
+# （ソフトウェアの語は除く）か分や時間の長さがある文（薬を飲むと、ここで効いてくるのが分かります）では出さない
+_CALQUE_PHRASE_MATTERS = "ここで効くのが"
+_CALQUE_MATTERS_FOCUS = _V220Lazy(r"[、，,]?[^。、，,]{0,8}?(?:" + _KIKU_LITERAL + r")(?:です|でした|だ|だった|である)?[。．！!]*$")
+# 「テーブルにある」の主語（案、選択肢、提案、議題、条件）。答案、図案、草案、文案のような紙の物は外す。
+# 「テーブルの上にある資料」のように、すぐあとに名詞が続く連体の形も外す（_CALQUE_TABLE_ATTRIBUTIVE）
+_CALQUE_TABLE_SUBJECT = _V220Lazy(r"(?:(?<![答図草文])案|選択肢|提案|議題|条件)(?:は|が|も|だけが|こそ)[、，,]?[^。]{0,20}$")
+_CALQUE_TABLE_ATTRIBUTIVE = _V220Lazy(r"(?:いる|いた|おり)?[一-龥々ァ-ヴーA-Za-z0-9]")
+_CALQUE_TURN_CONTEXT = _V220Lazy(r"指示|会話|依頼|プロンプト|モデル|エージェント|LLM|Claude|Codex|ツール|呼び出|読み込"
+                                 r"|応答|返答|トークン|コンテキスト|セッション")
+# ゲームの手番の「ターン」（毎ターン山札から引く、敵の AI は毎ターン行動を選ぶ）
+_CALQUE_TURN_GAME = _V220Lazy(r"ゲーム|カード|山札|手札|プレイヤー|将棋|囲碁|チェス|手番|モンスター|敵|攻撃|対戦|駒|盤")
+# 「ときに効く」は、構成や運用を決める話（what matters）か、機械やシステムの語がある文だけ（疲れたときに効くストレッチは外す）
+_CALQUE_KIKU_DECIDE = _V220Lazy(r"構成|設計|選ぶ|選び|決め|判断|見積|運用|導入|移行|方針|検討")
+# 「に響く」の文字どおりの音と心（心に響く、音が部屋に響く）
+_CALQUE_HIBIKU_LITERAL = _V220Lazy(r"(?:心|胸|耳|琴線)に(?:まで|も)?響|(?:音|声|鐘|足音|歌)(?:が|は|も)")
+# 「全〇〇に響く」の形と、前からある語の一覧の形（クライアントに響く など）。「全〇〇に響く」（全運転手に響きます）は
+# 技術の文書のときだけ、_CALQUE_PHRASES とは別に探す（合わせた正規表現に入れると、中の「3ターン」などの句の
+# 一致を飲み込むため）。安全、健全の「全」と、全然、全く、全体として は外す
+_CALQUE_HIBIKU_ALL = _V220Lazy(r"(?<![安完健保万不十])全(?!然|く|体として|体的)[^。、のをがは\s]{1,6}に(?:まで|も)?響(?:く|き|い|か)")
+# 「全〇〇に響く」で外す音や言葉。「全〇〇」より前の主語（警報が鳴り、全フロアに響きます、社長の言葉は、全社員に響きました）
+# と、「響く」のすぐあとの名詞（全社員に響く言葉、全館に響く爆音で、サーバーが止まりました）。1字の語は電話、録音のような
+# 語の一部では当てず、「思いがけない」も外す
+_CALQUE_HIBIKU_ALL_LITERAL = _V220Lazy(
+    r"(?:(?<![一-鿿])(?:話|音|声|歌|鐘|雷)|言葉|一言|スピーチ|訓示|あいさつ|挨拶|ニュース|演説|呼びかけ|呼び掛け|思い|想い|理念"
+    r"|名声|名曲|痛み|衝撃|振動|揺れ|アラーム|アラート|サイレン|警報|ベル|チャイム|ブザー|汽笛|放送|アナウンス|メロディー|うなり"
+    r"|着信|爆音|騒音|低音|足音|大声|拍手|歓声)(?:が|は|も)(?!け)")
+# 「響く」のすぐあとの名詞は、音で終わる短い複合語（警告音、着信音、大音量）も外す
+# 「全〇〇に響く」で機械の語に数える「〜機」（貸出機、券売機、機械）。危機、契機、動機、待機のような語に当てないよう、
+# 機械の名前の一覧で見る
+_CALQUE_HIBIKU_MACHINE = _V220Lazy(
+    r"(?:券売|貸出|貸し出し|発券|自販|自動販売|複合|印刷|洗濯|精算|改札|読取|読み取り|端末|飛行|旅客|撮影|計算|工作|送風|空調"
+    r"|掃除|乾燥|食洗|発電|充電|交換|配膳|給湯|注文|受付|両替|入金|出金|預け払い|搬送|仕分け|検品|梱包|包装|成形|射出|切削|溶接"
+    r"|検査|測定|計測|加工|[0-9０-９]+号)機|機械")
+_CALQUE_HIBIKU_ALL_NOUN = _V220Lazy(
+    r"(?:[一-鿿ァ-ヴー]{0,3}(?:音|声|音量)|言葉|話|一言|スピーチ|訓示|あいさつ|挨拶|メッセージ|ニュース|演説|呼びかけ|呼び掛け"
+    r"|思い|想い|名前|名声|名曲|痛み|衝撃|振動|揺れ|アラーム|アラート|サイレン|警報|ベル|チャイム|ブザー|汽笛|放送|アナウンス"
+    r"|メロディー|うなり|鐘|歌|音楽|拍手|歓声)")
+_CALQUE_HIBIKU_LISTED = _V220Lazy(_CALQUE_PHRASES[[name for name, _ in _CALQUE_PHRASES].index("に響く")][1])
+# 「に響く」の料金や費用は、機械やシステムの語がある文だけ（円安が費用に響く は外す）
+_CALQUE_HIBIKU_COST = ("料金", "費用", "コスト", "請求")
+# 「機械どうし」は、通信ややり取りの話のときだけ（工場の機械同士の間隔は外す）
+_CALQUE_MACHINE_TALK = _V220Lazy(r"通信|やり取り|やりとり|接続|データ|API|連携|認証|リクエスト|メッセージ|プロトコル|経路")
+
+
+def _v220_noun_start(text: str, position: int) -> bool:
+    """position の字が漢字かカタカナか英字か。"""
+    if position >= len(text):
+        return False
+    char = text[position]
+    return _v220_kanji(char) or _v220_katakana(char) or (char.isascii() and char.isalpha())
+
+
+def _v220_has_verb_stem(text: str) -> bool:
+    """型1の動詞の語幹の字があるか。"""
+    return not _CALQUE_VERB_STEMS.isdisjoint(text)
+
+
+def _calque_subject_end(sentence: str, limit: int) -> int:
+    """limit より前で最後の、機械やシステムの語が主語の「は」「が」「も」「こそ」の終わりの位置（なければ -1）。
+    主語の語のあとに漢字やカタカナが続いて、人や組織の語で終わるとき（サーバー管理者は）は主語にしない。"""
+    last = -1
+    for subject in _CALQUE_SUBJECT_WORD.finditer(sentence, 0, limit):
+        end = subject.end()
+        for extra in range(_CALQUE_SUBJECT_EXT + 1):
+            position = end + extra
+            if position >= limit:
+                break
+            particle = next((item for item in _CALQUE_SUBJECT_PARTICLES if sentence.startswith(item, position)), None)
+            if particle is not None:
+                if position + len(particle) <= limit and not _CALQUE_PERSON_EXT.search(sentence[end:position]):
+                    last = position + len(particle)
+                break
+            char = sentence[position]
+            if not (_v220_kanji(char) or _v220_katakana(char) or (char.isascii() and char.isalnum())):
+                break
+    return last
+
+
+def _calque_type1(sentence: str, words: list) -> bool:
+    """型1に当たれば True（当たった動詞の辞書の形を words に足す）。"""
+    if not _v220_has_verb_stem(sentence) or not _CALQUE_SUBJECT_WORD.search(sentence):
+        return False
+    found = False
+    established = None
+    matches = sorted((match.start(), index, match) for index, (stem, _, pattern) in enumerate(_CALQUE_VERB_EACH)
+                     if stem in sentence for match in pattern.finditer(sentence))
+    covered = -1
+    for start, index, match in matches:
+        if start < covered:
+            continue    # 同じ所に当たった別の動詞（引き込む と 引く）は、表の前のほうだけを数える
+        if start and _v220_kanji(sentence[start - 1]) and _CALQUE_VERB_EACH[index][1] not in _CALQUE_COMPOUND_OK \
+                and not match.group().startswith("食べ"):
+            continue    # 漢字の熟語の一部（不足し、共通す、電話し、有効、朝食）
+        covered = match.end()
+        subject_end = _calque_subject_end(sentence, start)
+        if subject_end < 0 or start - subject_end > _CALQUE_SUBJECT_REACH \
+                or _CALQUE_SUBJECT_BREAK.search(sentence, subject_end, start):
+            continue
+        if any(person.end() > subject_end for person in _CALQUE_PERSON_SUBJECT.finditer(sentence, subject_end, start)):
+            continue
+        if established is None:
+            established = [m.span() for m in _CALQUE_ESTABLISHED_TYPE1_RE.finditer(sentence)]
+        if any(left <= start < right for left, right in established):
+            continue
+        kana_match = _CALQUE_KANA_RUN.match(sentence, match.end())
+        assert kana_match is not None
+        kana = kana_match.group()
+        if (match.group() + kana).endswith(_CALQUE_ATTRIBUTIVE_END) \
+                and _v220_noun_start(sentence, match.end() + len(kana)):
+            continue    # 名詞を修飾する形（拾った通知、話した内容）
+        if kana.startswith(_CALQUE_REQUEST):
+            continue    # 読み手に頼む形（1行を足してください）。動作をするのは読み手
+        words.append(_CALQUE_VERB_EACH[index][1])
+        found = True
+    return found
+
+
+def _v220_noun_or_alnum(text: str, position: int) -> bool:
+    return 0 <= position < len(text) and (_v220_kanji(text[position]) or _v220_katakana(text[position])
+                                          or _v220_alnum(text[position]))
+
+
+def _calque_saki_spans(sentence: str) -> list:
+    """「〜先」の当たり（_CALQUE_SAKI_KANJI の語か、漢字1字と連用形の送り仮名のあとの「先」）の (始め, 終わり)。"""
+    spans = []
+    position = sentence.find("先")
+    while position >= 0:
+        end = position + 1
+        if position and not (end < len(sentence) and (_v220_kanji(sentence[end]) or _v220_katakana(sentence[end]))):
+            start = None
+            for word in _CALQUE_SAKI_KANJI:
+                if sentence.startswith(word, position - len(word)) and position >= len(word):
+                    start = position - len(word)
+                    break
+            if start is None and sentence[position - 1] in _CALQUE_SAKI_TAIL:
+                if position >= 2 and _v220_kanji(sentence[position - 2]):
+                    start = position - 2
+                elif (position >= 3 and _v220_hiragana(sentence[position - 2]) and _v220_kanji(sentence[position - 3])
+                      and sentence[position - 2:position] != "より"):
+                    start = position - 3
+            if start is not None and not _v220_noun_or_alnum(sentence, start - 1):
+                spans.append((start, end))
+        position = sentence.find("先", end)
+    return spans
+
+
+def _calque_has_org(sentence: str) -> bool:
+    """文に組織の名前（総務部、情報システム課、サポートセンター）があるか。"""
+    if any(word in sentence for word in _CALQUE_ORG_WORDS):
+        return True
+    for index, char in enumerate(sentence):
+        if (char in _CALQUE_ORG_SUFFIXES and index and (_v220_kanji(sentence[index - 1]) or _v220_katakana(sentence[index - 1]))
+                and not (index + 1 < len(sentence) and _v220_kanji(sentence[index + 1]))):
+            return True
+    return False
+
+
+def _v220_doc_tech(text: str) -> bool:
+    """技術の文書か（_CALQUE_TECH の語のうち、_CALQUE_DOC_TECH_GENERAL を除いた語が _CALQUE_DOC_TECH_MIN 種類以上）。"""
+    return len(set(_CALQUE_TECH.findall(text)) - _CALQUE_DOC_TECH_GENERAL) >= _CALQUE_DOC_TECH_MIN
+
+
+def _entry_subject_end(sentence: str, cache: dict) -> int:
+    """要求や呼び出しの主題（_CALQUE_ENTRY_SUBJECT）のいちばん早い終わり（なければ -1）。入口の一致ごとに文頭から
+    読み直さず、文1つにつき1回だけ探す。"""
+    if "subject" not in cache:
+        first = _CALQUE_ENTRY_SUBJECT.search(sentence)
+        cache["subject"] = first.end() if first is not None else -1
+    return cache["subject"]
+
+
+def _calque_type2(sentence: str, words: list, doc_tech: bool = False) -> bool:
+    """型2に当たれば True（当たった名詞を words に足す）。doc_tech は技術の文書か（入口と出口の拾い方に使う）。"""
+    if not _CALQUE_PLACE_HEAD.search(sentence):
+        return False
+    found = False
+    tech = None
+    cache = {}
+    for match in _CALQUE_PLACE_ALWAYS.finditer(sentence):
+        if match.group() != "受け口" and _v220_noun_start(sentence, match.end()):
+            continue
+        if not match.group().endswith(("受け口", "の口")):
+            if tech is None:
+                tech = bool(_CALQUE_TECH.search(sentence))
+            if not tech:
+                continue
+        words.append("受け口" if match.group() == "受け口" else "口")
+        found = True
+    for start, end in _calque_saki_spans(sentence):
+        word = sentence[start:end]
+        before = sentence[max(0, start - 8):end]
+        if _CALQUE_SAKI_TIME.search(word) or any(before.endswith(item) for item in _CALQUE_ESTABLISHED_SAKI):
+            continue
+        # 一覧の着地先などのほかは、技術の語のある文の「〜先」だけを見る（旅行の立ち寄り先、父の働き先は見ない）
+        if not any(word.endswith(kanji + "先") for kanji in _CALQUE_SAKI_KANJI):
+            if tech is None:
+                tech = bool(_CALQUE_TECH.search(sentence))
+            if not tech:
+                continue
+        words.append(word)
+        found = True
+    end_is_noun = _v220_noun_start
+    for match in _CALQUE_PLACE_CONTEXT.finditer(sentence):
+        word = match.group()
+        if word != "の口" and end_is_noun(sentence, match.end()):
+            continue
+        before = sentence[max(0, match.start() - 10):match.start()]
+        if word == "の口":
+            if _CALQUE_MOUTH_REAL.search(sentence[max(0, match.start() - 6):match.end()]) \
+                    or _CALQUE_MOUTH_IDIOM.match(sentence, match.start() + 1):
+                continue
+            if before.endswith(("向け", "用")):
+                continue    # _CALQUE_PLACE_ALWAYS で数えた
+            word = "口"
+        elif _CALQUE_PLACE_REAL.search(before):
+            continue
+        if word == "窓口":
+            if (_CALQUE_PLACE_ORG.search(before) or not _CALQUE_CODE.search(sentence)
+                    or _calque_has_org(sentence)):
+                continue
+        else:
+            if tech is None:
+                tech = bool(_CALQUE_TECH.search(sentence))
+            if not tech and not (doc_tech and word in ("入口", "入り口", "出口")
+                                 and _CALQUE_ENTRY_FLOW.match(sentence, match.end())
+                                 and 0 <= _entry_subject_end(sentence, cache) <= match.start()
+                                 and not _CALQUE_PLACE_REAL_DOC.search(before)
+                                 and not _CALQUE_ENTRY_WAIT.match(sentence, match.end())):
+                continue
+        words.append(word)
+        found = True
+    return found
+
+
+def _calque_type3(sentence: str, words: list, doc_tech: bool = False) -> bool:
+    """型3に当たれば True（当たった句の名前を words に足す）。doc_tech は技術の文書か（「全〇〇に響く」の拾い方に使う）。
+    文ごとに決まる値（機械やシステムの語があるか など）は、句の一致ごとに文を読み直さず、文1つにつき1回だけ求める。"""
+    if not _CALQUE_PHRASE_HEAD.search(sentence):
+        return False
+    found = False
+    type1_here = None
+    tech = None         # 文に機械やシステムの語（_CALQUE_TECH）があるか
+    literal = None      # 文字どおりの音と心の「響く」（_CALQUE_HIBIKU_LITERAL）があるか
+    hibiku = False      # この文で「に響く」を足したか
+    for match in _CALQUE_PHRASE.finditer(sentence):
+        name = next((name for name, each in _CALQUE_PHRASE_EACH if each.match(sentence, match.start())), match.group())
+        if name in (_CALQUE_PHRASE_KIKU, "ときに効く") and _KIKU_RE["context"].search(sentence):
+            continue
+        if name == "ときに効く" and _CALQUE_ESTABLISHED_TYPE1_RE.search(sentence):
+            continue
+        if name == _CALQUE_PHRASE_MATTERS:
+            verb_at = sentence.index("効", match.start())
+            if (_KIKU_RE["literal_subject"].search(sentence[:verb_at]) or _CALQUE_MATTERS_FOCUS.match(sentence, match.end())
+                    or _KIKU_RE["context_near"].search(sentence) or _KIKU_RE["timing"].search(sentence)):
+                continue
+        if name == "テーブルにある" and (not _CALQUE_TABLE_SUBJECT.search(sentence, 0, match.start())
+                                       or _CALQUE_TABLE_ATTRIBUTIVE.match(sentence, match.end())):
+            continue
+        if name == "ときに効く" and not _CALQUE_KIKU_DECIDE.search(sentence):
+            if tech is None:
+                tech = bool(_CALQUE_TECH.search(sentence))
+            if not tech:
+                continue
+        if name == "に響く":
+            if literal is None:
+                literal = bool(_CALQUE_HIBIKU_LITERAL.search(sentence))
+            if literal:
+                continue
+            if match.group().startswith(_CALQUE_HIBIKU_COST):
+                if tech is None:
+                    tech = bool(_CALQUE_TECH.search(sentence))
+                if not tech:
+                    continue
+        if name == "機械どうし" and not _CALQUE_MACHINE_TALK.search(sentence):
+            continue
+        if name == "書き込みが通る" and match.group().startswith("アクセス"):
+            if tech is None:
+                tech = bool(_CALQUE_TECH.search(sentence))
+            if not tech:
+                continue
+        # 型1が同じ文で同じ動詞を当てたときは、対応表から足した形を重ねない（このキャッシュは、応答の速さに響きます）。
+        # 同じ行のほかの文の型1とは比べない
+        verb = _CALQUE_PHRASE_VERB.get(name)
+        if verb:
+            if type1_here is None:
+                type1_here = []
+                _calque_type1(sentence, type1_here)
+            if verb in type1_here:
+                continue
+        # 「ターン」は、ゲームの手番でなく、指示や会話、モデルの呼び出しの話のときだけ
+        if name == "ターン" and (not _CALQUE_TURN_CONTEXT.search(sentence) or _CALQUE_TURN_GAME.search(sentence)):
+            continue
+        words.append(name)
+        found = True
+        if name == "に響く":
+            hibiku = True
+    # 一覧にない「全〇〇に響く」は、技術の文書の、機械やシステムの語（「〜機」を含む）がある文だけ。一覧の形を含む
+    # 「全〇〇」（全クライアントに響く、全費用に響く）は上で見たので外す。音や言葉の名詞が続く形（全社員に響く言葉）、
+    # 響き渡る、響くほど、響くように、音や言葉が主語の文、全身の響き、文字どおりの音と心の響きは外す
+    if doc_tech and not hibiku and "全" in sentence:
+        subject_end = None    # 音や言葉の主語（_CALQUE_HIBIKU_ALL_LITERAL）のいちばん早い終わり。なければ -1
+        for match in _CALQUE_HIBIKU_ALL.finditer(sentence):
+            if _CALQUE_HIBIKU_LISTED.search(sentence, match.start(), match.end()) or match.group().startswith("全身"):
+                continue
+            if literal is None:
+                literal = bool(_CALQUE_HIBIKU_LITERAL.search(sentence))
+            if tech is None:
+                tech = bool(_CALQUE_TECH.search(sentence))
+            if literal or not (tech or _CALQUE_HIBIKU_MACHINE.search(sentence)):
+                break           # どれも文ごとに決まるので、ほかの一致も外れる
+            after = match.end() + (1 if sentence.startswith("た", match.end()) else 0)
+            if (_CALQUE_HIBIKU_ALL_NOUN.match(sentence, after) or sentence.startswith(("渡", "わた", "ほど", "よう"), after)
+                    or sentence.startswith(("渡", "わた"), match.end())):
+                continue
+            if subject_end is None:
+                first = _CALQUE_HIBIKU_ALL_LITERAL.search(sentence)
+                subject_end = first.end() if first is not None else -1
+            if 0 <= subject_end <= match.start():
+                continue
+            if type1_here is None:
+                type1_here = []
+                _calque_type1(sentence, type1_here)
+            if "響く" in type1_here:
+                break
+            words.append("に響く")
+            found = True
+            break
+    return found
+
+
+def _calque_message(types: Sequence, word_types: Sequence) -> str:
+    """calque の message。1行に1件なので、当たった言い方を並べる（同じ行の2つ目を読み落とさないため。置き換え先の語は出さない）。"""
+    hit = tuple(dict.fromkeys(word for word, _ in word_types))
+    shown = "。当たった言い方: " + "、".join(hit) if hit else ""
+    return "直訳語（{}{}）{}".format("。".join(_CALQUE_TYPE_NAMES[number] for number in types), shown, _V220_MESSAGE_TAIL)
+
+
+def _v220_word_findings(analysis: dict, findings: list) -> list[dict]:
+    """calque、metaphor_label、katakana_term、thin_evaluation の候補。
 
     文書全体に一度だけ手掛かり（_V220_TRIGGER_LITERALS と2つの一覧の語）を当て、当たった行と、
-    見出しと1行目のうちラベルになりうる行だけを見える文字で調べる。"""
+    見出しと1行目のうちラベルになりうる行だけを見える文字で調べる。
+    既存の規則の候補は findings から読む（同じ行に metaphor_verb があれば calque を出さない）。"""
     rows = analysis["lines"]
     if not rows:
         return []
@@ -2196,7 +2827,9 @@ def _v220_word_findings(analysis: dict) -> list[dict]:
         break
     if not candidate_lines and not label_lines:
         return []
+    blocked_all = {finding["line"] for finding in findings if finding["rule"] == "metaphor_verb"}
     out = []
+    doc_tech = None
     for line_no in sorted(candidate_lines | label_lines):
         row = rows[line_no - 1]
         if row["kind"] not in ("paragraph", "list", "heading", "table") or row["quote_depth"]:
@@ -2212,16 +2845,44 @@ def _v220_word_findings(analysis: dict) -> list[dict]:
                         "_words": (label,)})
         if line_no not in candidate_lines:
             continue
+        # 伏せたあとの行に、規則ごとの手掛かりの語があるかを先に見る
+        finders = []
+        if line_no not in blocked_all:
+            if _v220_has_verb_stem(scan) and _CALQUE_SUBJECT_WORD.search(scan):
+                finders.append((1, _calque_type1))
+            if label is None and _CALQUE_PLACE_HEAD.search(scan):
+                if doc_tech is None:
+                    doc_tech = _v220_doc_tech(text)
+                # 見出しのラベルと同じ行の型2は metaphor_label だけを出す
+                finders.append((2, functools.partial(_calque_type2, doc_tech=doc_tech)))
+            if _CALQUE_PHRASE_HEAD.search(scan):
+                if doc_tech is None:
+                    doc_tech = _v220_doc_tech(text)
+                finders.append((3, functools.partial(_calque_type3, doc_tech=doc_tech)))
+        thin_possible = (thin_re is not None and thin_noun_re is not None
+                         and thin_noun_re.search(scan) is not None)
+        sentences = ()
+        if finders or thin_possible:
+            sentences = [part for part in (piece.strip() for piece in _V220_SENTENCE.findall(scan)) if part]
+        types = []
+        calque_words = []
+        word_types = []
+        for number, finder in finders:
+            before = len(calque_words)
+            if any([finder(sentence, calque_words) for sentence in sentences]):
+                types.append(number)
+                word_types.extend((word, number) for word in calque_words[before:])
+        if types:
+            out.append({"rule": "calque", "line": line_no, "severity": "info",
+                        "message": _calque_message(types, word_types), "snippet": snippet,
+                        "_words": tuple(dict.fromkeys(calque_words)), "_word_types": tuple(word_types)})
         if katakana_re is not None:
             katakana_words = katakana_re.findall(scan)
             if katakana_words:
                 out.append({"rule": "katakana_term", "line": line_no, "severity": "info",
                             "message": "意味の薄くなりやすいカタカナ語" + _V220_MESSAGE_TAIL, "snippet": snippet,
                             "_words": tuple(dict.fromkeys(katakana_words))})
-        thin_possible = (thin_re is not None and thin_noun_re is not None
-                         and thin_noun_re.search(scan) is not None)
         if thin_possible:
-            sentences = [part for part in (piece.strip() for piece in _V220_SENTENCE.findall(scan)) if part]
             thin_words = []
             for sentence in sentences:
                 match = _v220_thin_match(sentence)
@@ -2925,7 +3586,11 @@ _ALLOW_PARTIAL_RULES = ("ai_phrase", "calque", "katakana_term", "project_term", 
 def _finding_with_words(finding: dict, rest: tuple[str, ...]) -> dict:
     """許していない語（rest）だけを残した候補の写し。calque、project_term、renyo_noun、ai_phrase は message も作り直す。"""
     out = dict(finding, _words=rest)
-    if finding["rule"] == "project_term":
+    if finding["rule"] == "calque":
+        word_types = tuple((word, number) for word, number in finding.get("_word_types") or () if word in rest)
+        out["_word_types"] = word_types
+        out["message"] = _calque_message(list(dict.fromkeys(number for _, number in word_types)), word_types)
+    elif finding["rule"] == "project_term":
         out["message"] = _project_term_message(rest, finding.get("_pattern_matches") or {}, finding.get("_flag_hits"),
                                                finding.get("_replacements"))
     elif finding["rule"] == "renyo_noun":
@@ -3373,7 +4038,7 @@ def lint_text(text: str, *, words: dict | None = None) -> Dict[str, Any]:
         })
 
     # Phase 2: 上流 v3.0.0 の info 系規則(語彙・文の形・文書単位)
-    findings.extend(_v220_word_findings(analysis))
+    findings.extend(_v220_word_findings(analysis, findings))
     findings.extend(_v230_renyo_findings(analysis))
     findings.extend(_v250_ai_phrase_findings(analysis, None))
     findings.extend(_v220_shape_findings(analysis, findings, None))

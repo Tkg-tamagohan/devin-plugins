@@ -6,7 +6,8 @@ NAKA=中黒並列、LINE=一文一行、HEAD=見出し罫線、MET=比喩動詞�
 NEG=対比構文、BOLD=太字表示、STRUCT=構造解析移行、STDIO=標準入出力の UTF-8 化、
 V2=v1.1.1 Phase 2 の検出強化(語彙パターン、フィラー文単位化、info 文型、絞り込み)、
 V3=v1.1.1 Phase 3 のダッシュ3ルール化と否定構文強化、
-P2=yomiyasu v3.0.0 Phase 2 の info 系規則14件。
+P2=yomiyasu v3.0.0 Phase 2 の info 系規則14件、
+P3=yomiyasu v3.0.0 Phase 3 の calque 型1〜3。
 
 実行: `python3 test_slop_lint.py`(同ディレクトリから)
 """
@@ -15,6 +16,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import runpy
 import subprocess
 import sys
@@ -1126,6 +1128,139 @@ class TestYomiyasuV3Phase2(unittest.TestCase):
         # 比喩動詞「壊れる」の1件だけ(英語直訳「静かに壊れる」は二重反応として出ない)
         self.assertEqual(len(hits), 1)
         self.assertIn("壊れる", hits[0]["message"])
+
+
+class TestYomiyasuV3Phase3(unittest.TestCase):
+    """yomiyasu v3.0.0 Phase 3 の calque 型1〜3(info)と語彙リストとの整合。
+
+    文例は上流 tests/test_v220_a1.py の CALQUE_FIX/CALQUE_KEEP の類例。"""
+
+    def findings(self, text, words=None):
+        return lint_text(text, words=words)["findings"]
+
+    def rules(self, text, words=None):
+        return [f["rule"] for f in self.findings(text, words)]
+
+    def calques(self, text, words=None):
+        return [f for f in self.findings(text, words) if f["rule"] == "calque"]
+
+    def severities(self, rule, text, words=None):
+        return [f["severity"] for f in self.findings(text, words) if f["rule"] == rule]
+
+    def words(self, **kw):
+        base = {"path": "/x", "allow": (), "flag": (), "allow_lines": 0,
+                "flag_lines": 0, "allow_sha256": None, "flag_sha256": None}
+        base.update(kw)
+        return base
+
+    # 型1: 機械やシステムが主語で人の動作の動詞
+    def test_p3_01_型1の機械主語の動詞を検出する(self):
+        text = "取りこぼした通知は、翌朝の再送ジョブが拾います。\n"
+        hits = self.calques(text)
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["severity"], "info")
+        self.assertIn("型1", hits[0]["message"])
+        self.assertIn("拾う", hits[0]["message"])
+
+    def test_p3_02_型1の定着した言い方は検出しない(self):
+        self.assertEqual(self.calques("すべてのテストが通ったら、レビューを依頼してください。\n"), [])
+        self.assertEqual(self.calques("2回目からはキャッシュが効くので、同じ一覧は50ミリ秒ほどで返ります。\n"), [])
+
+    def test_p3_03_型1は人の主語と名詞修飾を検出しない(self):
+        self.assertEqual(self.calques("サーバー管理者が、毎朝ログを拾います。\n"), [])
+        self.assertEqual(self.calques("担当者は、ジョブが拾った通知を確かめます。\n"), [])
+
+    # 型2: 場所のたとえの名詞
+    def test_p3_04_型2の受け口を検出する(self):
+        text = "外部からの注文データは、すべてこの受け口に届きます。\n"
+        hits = self.calques(text)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("型2", hits[0]["message"])
+        self.assertIn("受け口", hits[0]["message"])
+
+    def test_p3_05_型2の入口は技術語がある文で検出する(self):
+        text = "社外からの接続は、この入口を通ります。\n"
+        hits = self.calques(text)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("型2", hits[0]["message"])
+        self.assertIn("入口", hits[0]["message"])
+
+    def test_p3_06_型2の実物の場所と定着した先は検出しない(self):
+        self.assertEqual(self.calques("本社ビルの正面入口は、工事のため11月末まで閉じています。\n"), [])
+        self.assertEqual(self.calques("このパッケージの依存先は、`package.json` の `dependencies` に書いてあります。\n"), [])
+
+    # 型3: 英語の言い方を一語ずつ写した句
+    def test_p3_07_型3の句を検出する(self):
+        text = "新しい鍵に替えると、古い鍵の失効が効きます。\n"
+        hits = self.calques(text)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("型3", hits[0]["message"])
+        self.assertIn("失効が効く", hits[0]["message"])
+
+    def test_p3_08_型3の別の句を検出する(self):
+        text = "この変更には、足すものがありません。\n"
+        hits = self.calques(text)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("足すものがない", hits[0]["message"])
+
+    def test_p3_09_型3は文字どおりの効くを検出しない(self):
+        self.assertEqual(self.calques("この薬は、寝る前に飲むときに効きます。\n"), [])
+        self.assertEqual(self.calques("雨の日はブレーキが効きにくくなるため、車間を広めに取ってください。\n"), [])
+
+    # 1行に複数の型は1件にまとめ、型名と言い方を並べる
+    def test_p3_10_1行の二つの型は一件で型名と言い方を並べる(self):
+        text = "外部からの注文は、この受け口に届き、夜間の集計バッチが拾います。\n"
+        hits = self.calques(text)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("型1", hits[0]["message"])
+        self.assertIn("型2", hits[0]["message"])
+        self.assertIn("拾う", hits[0]["message"])
+        self.assertIn("受け口", hits[0]["message"])
+
+    # 同じ行に metaphor_verb の候補があれば calque を出さない
+    def test_p3_11_同じ行の比喩動詞はcalqueを出さない(self):
+        text = "データが静かに壊れても、再送ジョブが拾います。\n"
+        self.assertIn("metaphor_verb", self.rules(text))
+        self.assertNotIn("calque", self.rules(text))
+        # 対照: 比喩動詞のない行では calque が出る
+        self.assertIn("calque", self.rules("届かなくても、再送ジョブが拾います。\n"))
+
+    # 語彙リストとの整合
+    def test_p3_12_allowの語ですべての言い方を外せる(self):
+        text = "取りこぼした通知は、翌朝の再送ジョブが拾います。\n"
+        words = self.words(allow=("拾う",), allow_lines=1)
+        self.assertNotIn("calque", self.rules(text, words))
+
+    def test_p3_13_allowは残りの言い方でmessageを作り直す(self):
+        text = "外部からの注文は、この受け口に届き、夜間の集計バッチが拾います。\n"
+        words = self.words(allow=("拾う",), allow_lines=1)
+        hits = self.calques(text, words)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("型2", hits[0]["message"])
+        self.assertIn("受け口", hits[0]["message"])
+        self.assertNotIn("拾う", hits[0]["message"])
+        self.assertNotIn("型1", hits[0]["message"])
+
+    def test_p3_14_flagの語はcalqueを外さずproject_termを別に出す(self):
+        text = "社外からの接続は、この入口を通ります。\n"
+        words = self.words(flag=("入口",), flag_lines=1, flag_sha256="0" * 64)
+        rules = self.rules(text, words)
+        self.assertIn("calque", rules)
+        self.assertIn("project_term", rules)
+
+    def test_p3_15_flag_patternもcalqueを外さない(self):
+        text = "外部からの注文データは、すべてこの受け口に届きます。\n"
+        pattern = ("テスト用パターン", r"受け口", re.compile(r"受け口"), (("受け口",),))
+        words = self.words(flag_patterns=(pattern,), flag_patterns_lines=1, flag_patterns_sha256="0" * 64)
+        rules = self.rules(text, words)
+        self.assertIn("calque", rules)
+        self.assertIn("project_term", rules)
+        # パターンの名前を allow.txt に書くと project_term だけが外れ、calque は残る
+        allowed = self.words(allow=("テスト用パターン",), allow_lines=1,
+                             flag_patterns=(pattern,), flag_patterns_lines=1, flag_patterns_sha256="0" * 64)
+        rules = self.rules(text, allowed)
+        self.assertIn("calque", rules)
+        self.assertNotIn("project_term", rules)
 
 
 class TestStreamsWithoutReconfigure(unittest.TestCase):
