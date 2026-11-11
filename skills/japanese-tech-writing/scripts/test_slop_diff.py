@@ -74,7 +74,7 @@ _TEMP_FILES = []
 
 def write_temp(content: str, suffix: str = ".md") -> str:
     f = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=suffix, delete=False
+        mode="w", encoding="utf-8", suffix=suffix, delete=False, dir="."
     )
     f.write(content)
     f.close()

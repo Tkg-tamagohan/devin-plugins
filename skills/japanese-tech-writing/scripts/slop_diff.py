@@ -39,6 +39,26 @@ except ModuleNotFoundError as error:
     _bold_module = importlib.util.module_from_spec(_bold_spec)
     _bold_spec.loader.exec_module(_bold_module)
     bold_problems = _bold_module.bold_problems
+try:
+    if __package__:
+        from .markdown_visibility import decode_source, input_path_problem
+    else:
+        from markdown_visibility import decode_source, input_path_problem
+except ModuleNotFoundError as error:
+    # A direct spec_from_file_location loader need not put this file's directory
+    # on sys.path. Resolve this internal resource beside the actual source file.
+    expected = (__package__ + ".markdown_visibility") if __package__ else "markdown_visibility"
+    parent = __package__.split(".")[0] if __package__ else "markdown_visibility"
+    if error.name not in (expected, parent):
+        raise
+    import importlib.util
+    from pathlib import Path
+    _visibility_spec = importlib.util.spec_from_file_location(
+        "_yomiyasu_markdown_visibility", Path(__file__).with_name("markdown_visibility.py"))
+    _visibility_module = importlib.util.module_from_spec(_visibility_spec)
+    _visibility_spec.loader.exec_module(_visibility_module)
+    decode_source = _visibility_module.decode_source
+    input_path_problem = _visibility_module.input_path_problem
 from collections import Counter, OrderedDict
 
 # 文末や言い回しの種類。数が増えた・減ったものを候補にする
@@ -444,9 +464,42 @@ def report(d: dict) -> str:
     return "\n".join(lines) if lines else "（候補なし）"
 
 
-def read_text(path):
-    with open(path, encoding="utf-8") as handle:
-        return handle.read()
+def _path_problem(path):
+    """コマンドラインで渡されたファイルを読まないときの誤りの文か None"""
+    reason = input_path_problem(path)
+    if reason is None:
+        return None
+    return "Error opening file {}: {}。このファイルを渡すときは、標準入力から渡してください（ファイルの名前の代わりに - を渡します。1か所だけ）".format(path, reason)
+
+
+def _read_input(path):
+    """ファイルか標準入力を読み、(文字列, None) か (None, 誤りの文) を返す"""
+    if path is not None and path != "-":
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except (OSError, ValueError) as error:
+            reason = getattr(error, "strerror", None) or error
+            return None, "Error opening file {}: ファイルを開けません（{}）".format(path, reason)
+        try:
+            return decode_source(data)[0], None
+        except UnicodeDecodeError:
+            return None, "Error opening file {}: UTF-8 として読めません".format(path)
+    stream = sys.stdin
+    if stream is None:
+        return None, "Error reading stdin: 標準入力を読めません（標準入力がありません）"
+    try:
+        buffer = getattr(stream, "buffer", None)
+        data = buffer.read() if buffer is not None else stream.read()
+    except UnicodeDecodeError:
+        return None, "Error reading stdin: UTF-8 として読めません"
+    except (OSError, ValueError) as error:
+        reason = getattr(error, "strerror", None) or error
+        return None, "Error reading stdin: 標準入力を読めません（{}）".format(reason)
+    try:
+        return decode_source(data)[0], None
+    except UnicodeDecodeError:
+        return None, "Error reading stdin: UTF-8 として読めません"
 
 
 if __name__ == "__main__":
@@ -459,7 +512,14 @@ if __name__ == "__main__":
             stance = STANCES.get(a.split("=", 1)[1])
     if "--endings" in sys.argv and args:
         # 1つのファイルの文末だけを見る（マークダウンのコードブロックや表の区切りは飛ばす）
-        t = read_text(args[0])
+        problem = _path_problem(args[0])
+        if problem:
+            print(problem, file=sys.stderr)
+            sys.exit(2)
+        t, problem = _read_input(args[0])
+        if problem:
+            print(problem, file=sys.stderr)
+            sys.exit(2)
         rows, flags = stance_flags(t, stance, markdown=True)
         from collections import Counter
         c = Counter(r["kind"] for r in rows if r["where"] != "表")
@@ -477,7 +537,21 @@ if __name__ == "__main__":
         print("使い方: python3 slop_diff.py 元の文.txt 書き直した文.txt [--stance=勧め|決まり|説明] [--json]")
         print("　　　  python3 slop_diff.py --endings ファイル [--stance=勧め|決まり|説明]")
         sys.exit(1)
-    o = read_text(args[0])
-    r = read_text(args[1])
+    if args[:2].count("-") > 1:
+        print("標準入力（-）は1か所だけに使えます", file=sys.stderr)
+        sys.exit(2)
+    for path in args[:2]:
+        problem = _path_problem(path)
+        if problem:
+            print(problem, file=sys.stderr)
+            sys.exit(2)
+    o, problem = _read_input(args[0])
+    if problem:
+        print(problem, file=sys.stderr)
+        sys.exit(2)
+    r, problem = _read_input(args[1])
+    if problem:
+        print(problem, file=sys.stderr)
+        sys.exit(2)
     d = diff(o, r, stance)
     print(json.dumps(d, ensure_ascii=True, indent=1) if "--json" in sys.argv else report(d))

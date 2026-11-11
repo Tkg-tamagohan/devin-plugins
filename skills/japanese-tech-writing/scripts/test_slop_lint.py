@@ -837,7 +837,7 @@ class TestStdioEncoding(unittest.TestCase):
     """標準入出力が cp932 の環境でも UTF-8 で読み書きする(上流 test_stdio_encoding.py の移植)"""
 
     def setUp(self):
-        folder = tempfile.TemporaryDirectory(prefix="slop-stdio-")
+        folder = tempfile.TemporaryDirectory(prefix="slop-stdio-", dir=".")
         self.addCleanup(folder.cleanup)
         self.root = Path(folder.name)
 
@@ -892,7 +892,7 @@ class TestStreamsWithoutReconfigure(unittest.TestCase):
     """reconfigure() を持たない標準入出力(IDLE やプロセス内実行)でも動く"""
 
     def setUp(self):
-        folder = tempfile.TemporaryDirectory(prefix="slop-stdio-")
+        folder = tempfile.TemporaryDirectory(prefix="slop-stdio-", dir=".")
         self.addCleanup(folder.cleanup)
         self.path = Path(folder.name) / "sample.md"
         self.path.write_text(SAMPLE, encoding="utf-8")
