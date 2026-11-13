@@ -14,7 +14,9 @@ skills/plugin-authoring/guidelines.md のチェックリストのうち、機械
 - README.md: 各ルール・スキル名がバッククォートつきで収録一覧に載っている
 - docs/*.md: チェックリストを持つ計画書に `状態:` 行(進行中/完了/中断)がある、
   「進行中」なのに全項目チェック済みの矛盾がない
-- .devin-plugin/plugin.json: name, version, description を持つ JSON
+- .devin-plugin/plugin.json: name, version, description を持つ JSON。
+  author, homepage, repository, license, keywords, platforms など公式仕様の
+  フィールドについても型を検査する
 - --version-base <ref>: 指定した git ref の plugin.json と version が
   変わっていることを確認(PR でのバージョン更新忘れの検出用)
 
@@ -39,6 +41,11 @@ AGENTS_SECTION_LINE_LIMIT = 5
 # version の意味づけ対象となるプラグイン中身のパス。これらの移動・改名・削除は
 # guidelines.md の規約上マイナーバンプを要求する
 VERSIONED_CONTENT_PATHS = ("rules", "skills", "AGENTS.md", "README.md")
+PLUGIN_JSON_LABEL = ".devin-plugin/plugin.json"
+PLUGIN_JSON_REQUIRED_STRING_FIELDS = ("name", "version", "description")
+PLUGIN_JSON_OPTIONAL_STRING_FIELDS = ("homepage", "repository", "license", "logo")
+PLUGIN_JSON_DEPENDENCY_LIST_FIELDS = ("requiredPlugins", "optionalPlugins", "forbiddenPlugins")
+PLUGIN_JSON_ALLOWED_PLATFORMS = frozenset({"cloud", "local", "security"})
 
 
 def parse_frontmatter(text: str) -> Optional[dict]:
@@ -227,8 +234,147 @@ def check_docs() -> List[str]:
     return errors
 
 
+def _is_non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _check_plugin_json_mcp_servers(value: object, errors: List[str]) -> None:
+    if _is_non_empty_string(value):
+        return
+    if isinstance(value, list):
+        if all(_is_non_empty_string(item) for item in value):
+            return
+        errors.append(
+            f"{PLUGIN_JSON_LABEL}: mcpServers は文字列、文字列の配列、"
+            "paths/exclusive オブジェクト、サーバー定義のオブジェクトのいずれかである必要があります"
+        )
+        return
+    if isinstance(value, dict):
+        keys = set(value.keys())
+        if keys & {"paths", "exclusive"}:
+            paths = value.get("paths")
+            if not isinstance(paths, list) or not all(
+                _is_non_empty_string(path) for path in paths
+            ):
+                errors.append(
+                    f"{PLUGIN_JSON_LABEL}: mcpServers.paths は文字列の配列である必要があります"
+                )
+            if "exclusive" in value and not isinstance(value["exclusive"], bool):
+                errors.append(
+                    f"{PLUGIN_JSON_LABEL}: mcpServers.exclusive は真偽値である必要があります"
+                )
+            if not keys <= {"paths", "exclusive"}:
+                errors.append(
+                    f"{PLUGIN_JSON_LABEL}: mcpServers の paths/exclusive 形式に未知のキーがあります"
+                )
+            return
+        for name, server in value.items():
+            if not isinstance(server, dict):
+                errors.append(
+                    f"{PLUGIN_JSON_LABEL}: mcpServers.{name} はオブジェクトである必要があります"
+                )
+        return
+    errors.append(
+        f"{PLUGIN_JSON_LABEL}: mcpServers は文字列、文字列の配列、"
+        "paths/exclusive オブジェクト、サーバー定義のオブジェクトのいずれかである必要があります"
+    )
+
+
+def validate_plugin_json(data: object) -> List[str]:
+    """plugin.json の必須項目と公式仕様フィールドの型を検査する"""
+    errors: List[str] = []
+    if not isinstance(data, dict):
+        return [f"{PLUGIN_JSON_LABEL}: JSON のトップレベルがオブジェクトではありません"]
+
+    for key in PLUGIN_JSON_REQUIRED_STRING_FIELDS:
+        if key not in data:
+            errors.append(f"{PLUGIN_JSON_LABEL}: {key} がありません")
+            continue
+        value = data[key]
+        if not isinstance(value, str):
+            errors.append(f"{PLUGIN_JSON_LABEL}: {key} は文字列である必要があります")
+        elif not value.strip():
+            errors.append(f"{PLUGIN_JSON_LABEL}: {key} がありません")
+
+    for key in PLUGIN_JSON_OPTIONAL_STRING_FIELDS:
+        if key not in data:
+            continue
+        if not _is_non_empty_string(data[key]):
+            errors.append(
+                f"{PLUGIN_JSON_LABEL}: {key} は空でない文字列である必要があります"
+            )
+
+    if "author" in data:
+        author = data["author"]
+        if not isinstance(author, dict):
+            errors.append(f"{PLUGIN_JSON_LABEL}: author はオブジェクトである必要があります")
+        else:
+            for key in ("name", "email"):
+                if key in author and not _is_non_empty_string(author[key]):
+                    errors.append(
+                        f"{PLUGIN_JSON_LABEL}: author.{key} は空でない文字列である必要があります"
+                    )
+
+    if "keywords" in data:
+        keywords = data["keywords"]
+        if not isinstance(keywords, list) or not all(
+            _is_non_empty_string(keyword) for keyword in keywords
+        ):
+            errors.append(f"{PLUGIN_JSON_LABEL}: keywords は文字列の配列である必要があります")
+
+    if "platforms" in data:
+        platforms = data["platforms"]
+        if not isinstance(platforms, list) or not all(
+            _is_non_empty_string(platform) for platform in platforms
+        ):
+            errors.append(f"{PLUGIN_JSON_LABEL}: platforms は文字列の配列である必要があります")
+        else:
+            for platform in platforms:
+                if platform not in PLUGIN_JSON_ALLOWED_PLATFORMS:
+                    errors.append(
+                        f"{PLUGIN_JSON_LABEL}: platforms に公式仕様外の値 {platform!r} があります"
+                        "(cloud, local, security のいずれか)"
+                    )
+
+    if "skills" in data:
+        skills = data["skills"]
+        valid_skills = _is_non_empty_string(skills) or (
+            isinstance(skills, list)
+            and all(_is_non_empty_string(skill) for skill in skills)
+        )
+        if not valid_skills:
+            errors.append(
+                f"{PLUGIN_JSON_LABEL}: skills は空でない文字列または文字列の配列である必要があります"
+            )
+
+    for key in PLUGIN_JSON_DEPENDENCY_LIST_FIELDS:
+        if key not in data:
+            continue
+        entries = data[key]
+        if not isinstance(entries, list):
+            errors.append(f"{PLUGIN_JSON_LABEL}: {key} は配列である必要があります")
+            continue
+        for index, entry in enumerate(entries):
+            if _is_non_empty_string(entry):
+                continue
+            if isinstance(entry, dict):
+                if not _is_non_empty_string(entry.get("source")):
+                    errors.append(
+                        f"{PLUGIN_JSON_LABEL}: {key}[{index}] は source を持つオブジェクトか"
+                        "文字列である必要があります"
+                    )
+                continue
+            errors.append(
+                f"{PLUGIN_JSON_LABEL}: {key}[{index}] は文字列またはオブジェクトである必要があります"
+            )
+
+    if "mcpServers" in data:
+        _check_plugin_json_mcp_servers(data["mcpServers"], errors)
+
+    return errors
+
+
 def check_plugin_json() -> List[str]:
-    errors = []
     path = REPO_ROOT / ".devin-plugin" / "plugin.json"
     if not path.is_file():
         return [".devin-plugin/plugin.json がありません"]
@@ -236,10 +382,7 @@ def check_plugin_json() -> List[str]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return [f".devin-plugin/plugin.json: JSON として解釈できません({e})"]
-    for key in ("name", "version", "description"):
-        if not data.get(key):
-            errors.append(f".devin-plugin/plugin.json: {key} がありません")
-    return errors
+    return validate_plugin_json(data)
 
 
 def check_version_bump(base_ref: str) -> List[str]:

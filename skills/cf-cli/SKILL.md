@@ -19,7 +19,7 @@ Cloudflare の運用を、REST API を個別に組み立てることなく完結
 `cf` は npm パッケージとして配布され、グローバルインストールはせず `npx` でバージョンを指定して実行する。
 
 ```bash
-npx -y cf@1.0.0-beta.5 <command>
+npx -y cf@1.0.0-beta.29 <command>
 ```
 
 オープンベータの段階にあるため、スクリプトや CI に組み込むときは特にバージョンを固定する。
@@ -33,11 +33,11 @@ wrangler と同じ環境変数なので、wrangler 用に発行済みの API ト
 
 ## コマンドの探し方
 
-操作は約 3,000 ある(執筆時点 2026-09、`cf@1.0.0-beta.5`)ため、コマンド名を調べてから実行するのではなく、自然言語で検索する。
+操作は多数ある(執筆時点 2026-11、`cf@1.0.0-beta.29`)ため、コマンド名を調べてから実行するのではなく、自然言語で検索する。
 
 ```bash
-npx -y cf@1.0.0-beta.5 cli search "list pages projects"
-# [{"command": "cf pages projects list", "summary": "Get projects"}, ...]
+npx -y cf@1.0.0-beta.29 cli search "list pages projects"
+# [{"command": "cf pages list", "summary": "List Cloudflare Pages projects"}, ...]
 ```
 
 引数は `<command> --help` で確認する。
@@ -48,17 +48,17 @@ npx -y cf@1.0.0-beta.5 cli search "list pages projects"
 出力は既定で JSON なので、`jq` で必要な項目だけを取り出す。
 
 ```bash
-CLOUDFLARE_ACCOUNT_ID=<id> npx -y cf@1.0.0-beta.5 pages projects list | jq '.[].name'
+CLOUDFLARE_ACCOUNT_ID=<id> npx -y cf@1.0.0-beta.29 pages list | jq '.[].name'
 ```
 
 ## 主なコマンド
 
-実行するときは `npx -y cf@1.0.0-beta.5` に続けてサブコマンドを渡す。
+実行するときは `npx -y cf@1.0.0-beta.29` に続けてサブコマンドを渡す。
 
 ```bash
-cf pages projects list                      # Pages プロジェクトと最新デプロイの一覧
-cf pages projects deployments list          # デプロイ履歴
-cf pages deploy <dir>                       # 静的サイトの直接アップロード
+cf pages list                            # Pages プロジェクトと最新デプロイの一覧
+cf pages deployments list --project-name <name>  # 指定プロジェクトのデプロイ履歴
+cf pages deploy <dir>                    # 静的サイトの直接アップロード
 cf zero-trust access applications get <id>  # Access アプリケーションとポリシーの参照
 ```
 

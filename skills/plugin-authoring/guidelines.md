@@ -120,6 +120,20 @@ rule は求める振る舞いか対象を表す語(`ui-mock-first`、`library-li
 rule が 10 件を超えたら、description が同じ状況を指しているものがないかを見直す。
 見直しの結果は、統合や分離の判断理由とともに PR 本文に残す。
 
+## プラグイン仕様の採否
+
+2026-09 から 2026-11 に拡張されたプラグイン仕様について、このプラグインで採用する範囲を次の表に定める。
+根拠は Devin Docs の該当箇所とし、採用しない機能にも再検討の条件を残す。
+
+| 機能 | 採否 | 理由 | 根拠 |
+| --- | --- | --- | --- |
+| `hooks.json` | 不採用 | 公式は best effort で fail open とし、重要なガードレールには使わないよう明記している。クラウドセッションは command hooks のみで `SessionEnd` を発火しないため、セッション横断の保証には向かない。 | [Devin CLI plugins](https://docs.devin.ai/cli/extensibility/plugins/overview.md), [Plugins guide](https://docs.devin.ai/product-guides/plugins.md#hooks) |
+| `agents/`(カスタムサブエージェント) | 当面見送り | カスタムサブエージェントは CLI と Devin Desktop のローカルエージェントでのみ読み込まれ、クラウドセッションでは使えない。全セッションで使う共有ルールとスキルを主軸にする現状では、クラウドで動かない機能を増やさない。 | [Devin CLI plugins](https://docs.devin.ai/cli/extensibility/plugins/overview.md), [Set up your plugin ecosystem](https://docs.devin.ai/product-guides/plugin-ecosystem.md#current-limitations) |
+| `platforms` | 採用 | `cloud`、`local`、`security` のいずれかにプラグインの読み込み面を限定できる。既定は全環境なので、このプラグインのように全セッション向けの内容には設定しない。ローカル専用やセキュリティスキャン専用のプラグインを作るときに設定する。 | [Devin CLI plugins](https://docs.devin.ai/cli/extensibility/plugins/overview.md#platforms) |
+| Playbooks から Skills への移行 | 移行を記録 | Playbooks は Skills へ移行中で、2026-10-24 以降に作られる新規アカウントは Skills から始まる。新しい再利用手順は Skills に書き、Playbooks は既存の移行対象として扱う。 | [Using Playbooks](https://docs.devin.ai/product-guides/using-playbooks.md#playbooks-are-moving-to-skills), [Devin Skills](https://docs.devin.ai/product-guides/skills.md#skills-vs-playbooks) |
+| manifest メタデータ | 採用 | `name`、`version`、`description` に加えて `author`、`homepage`、`repository`、`license`、`keywords`、`logo` は説明用メタデータとして `devin plugins info` に表示される。`plugin.json` には `author`、`homepage`、`repository`、`license`、`keywords` を実値で設定し、`logo` は画像資産がないため設定しない。 | [Devin CLI plugins](https://docs.devin.ai/cli/extensibility/plugins/overview.md#metadata) |
+| `.mcp.json` / `requiredPlugins` | 現状は不採用 | このプラグインは `AGENTS.md`、`rules/`、`skills/` のみで完結し、全セッションで起動する MCP サーバーや自動インストールする依存プラグインを必要としない。`mcpServers` は接続設定と資格情報の管理を増やし、`requiredPlugins` はインストールを他プラグインへ依存させる。必要になった時点で公式の MCP と dependencies の節を再確認して判断する。 | [Devin CLI plugins](https://docs.devin.ai/cli/extensibility/plugins/overview.md#mcp-servers), [dependencies](https://docs.devin.ai/cli/extensibility/plugins/overview.md#dependencies), [Plugin MCP servers](https://docs.devin.ai/product-guides/plugin-mcp-setups.md) |
+
 ## チェックリスト
 
 作成、変更した内容を PR に出す前に点検する。
