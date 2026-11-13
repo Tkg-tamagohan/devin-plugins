@@ -20,6 +20,9 @@ ID は CAT-連番。方向1(カタログの各表現がリントで検出され�
 - 節 3-7: 表の語彙列(節 3 は 2 列目、節 4-7 は節ごとの `語彙/熟語群/対象語彙/
   対象表現` 列)にある `バッククォート` 語彙が検出対象。語が SLOP_WORDS にあるか
   いずれかのパターンに一致すれば検出可能とみなす。
+- 節 8「lint の info 規則が拾う文の形と言い回し」: 表は「規則 | 型・言い回し |
+  例 | 見直すときの注意」の 4 列。語彙列の抽出はせず、列2 の「…」引用の例を
+  `lint_text` にかけ、行の規則が実際に検出されることを確かめる(cat_10)。
 
 上記で検出できない項目は EXEMPTIONS に「項目 -> 免除理由」として列挙する。
 理由のない免除はテストが弾くため、カタログ側に表現を増やすか理由を書く。
@@ -50,6 +53,8 @@ from slop_lint import (
     _SHORT_MOCHIRON,
     _SUMMARY_HEADING,
     _dash_finding,
+    _SAY_HEDGE,
+    lint_text,
 )
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "references" / "slop-catalog.md"
@@ -65,7 +70,7 @@ DETECTION_PATTERNS = (
     + [p for p, _, _ in INFO_SENTENCE_PATTERNS]
     + [NEGATIVE_PARALLELISM_PATTERN, _NEGATION_EXTRA, _NEGATION_JANAI,
        _SHORT_MOCHIRON, _FRAGMENT_RUN, _BOLD_LABEL_ITEM, _SUMMARY_HEADING,
-       _DASH_RUN]
+       _DASH_RUN, _SAY_HEDGE]
 )
 
 # 免除マニフェスト: カタログの表現で機械検出できないものとその理由。
@@ -117,7 +122,6 @@ EXEMPTIONS = {
     "ご希望があれば〜できます": "「ご希望があれば」検出は後続の「次に」「続けて」等を要求するため、この形は参照に留める",
     "〜を知りたいですか？": _FILLER_UNIMPLEMENTED,
     "〜というわけです": _FILLER_UNIMPLEMENTED,
-    "〜と言えるでしょう": _FILLER_UNIMPLEMENTED,
     "ぜひ試してみてください": "リントの定型クロージング検出は「ぜひ(参考|試し|活用)(に)して…ください」の形を要求するため、素の「ぜひ試して」形は参照に留める",
     # 節 7: 硬い漢語と決まり文句はいずれも文脈依存の一般用語
     "活用する": _CONTEXT_DEPENDENT, "実施する": _CONTEXT_DEPENDENT,
@@ -195,6 +199,13 @@ def row_detected(usages: list, terms: list) -> bool:
     return any(detected(u) for u in usages) or any(detected(t) for t in terms)
 
 
+# 節8の metaphor_label の例は見出しの形を要求するため、本文を添えて検査する
+_CAT10_BODY = ("同じ顧客が同じ内容で24時間以内に送った問い合わせは、1件にまとめました。"
+               "区分は、受け付けた担当者が付けたものをそのまま使いました。\n\n"
+               "これは、みんなにくばる、ためしのぶんしょうです。よんでから、つぎのところへすすんでください。"
+               "わからないところは、あとでききます。\n")
+
+
 class TestCatalogCoverage(unittest.TestCase):
     """方向1: カタログの各検出対象がリントで拾える"""
 
@@ -227,7 +238,9 @@ class TestCatalogCoverage(unittest.TestCase):
         for sec in catalog_sections():
             if sec["num"] < 3:
                 continue
-            col = vocab_col[sec["num"]]
+            col = vocab_col.get(sec["num"])
+            if col is None:
+                continue  # 節8は語彙列を持たず、cat_10 が例文と規則の対応を確かめる
             for cells in table_rows(sec["lines"])[1:]:
                 if len(cells) <= col:
                     continue
@@ -235,6 +248,21 @@ class TestCatalogCoverage(unittest.TestCase):
                     if not detected(w) and w not in EXEMPTIONS:
                         failures.append(w)
         self.assertEqual(sorted(set(failures)), [])
+
+    def test_cat_10_節8の例は対応するinfo規則を検出する(self):
+        # 節8は文の形と言い回しの規則を扱うため、表の例を実際に lint_text にかけ、
+        # 行の規則が findings に出ることを確かめる
+        lines = next(s for s in catalog_sections() if s["num"] == 8)["lines"]
+        failures = []
+        for cells in table_rows(lines)[1:]:
+            rule = cells[0].strip().strip("`")
+            for example in quoted(cells[2]):
+                text = ("## " + example + "\n\n" + _CAT10_BODY
+                        if rule == "metaphor_label" else example + "\n")
+                rules = {f["rule"] for f in lint_text(text)["findings"]}
+                if rule not in rules:
+                    failures.append((rule, example))
+        self.assertEqual(failures, [])
 
     def test_cat_04_免除マニフェストは理由つきで現存する項目のみ(self):
         covered = covered_expressions()

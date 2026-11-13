@@ -15,6 +15,8 @@
 - `--fail-on` には `warn`(warn か error の候補)と `error` を、カンマ区切りまたは繰り返しで指定できる。
 - `meaning-risk` は意味リスクの判定が別計画のため lint では使えない(判定には2つの文章の比較が必要で、現在はどのコマンドでも使えない)。
 - 点数(`rule_penalty_score`)は `--strict` と `--fail-on` の条件に使えない。
+- info の候補は `--strict` と `--fail-on` の条件に入らない。
+- `rule_penalty_score` は上流 2.2.0 以降で足した規則の候補を数えず、それ以外の候補は error 3、warn 2、info 1 の重さで数える(数えない規則の一覧は `--help` の末尾)。
 
 終了コードの意味は次のとおり。
 
@@ -47,6 +49,15 @@ while IFS= read -r -d '' f; do
 done < <(git ls-files -z -- '*.md')
 exit $status
 ```
+
+## 語の一覧(.yomiyasu-words/)
+
+`.yomiyasu-words/` の3つのファイルの役割は次のとおり。
+空行と `#` で始まる行はどのファイルでも除く。
+
+- `allow.txt` は指摘を外す語を1行に1語で書き、当たった語が一覧にあれば候補を外すか、その語を除いて残す(規則ごとの決まりは `slop_lint.py` の `_ALLOW_RULES`)。
+- `flag.txt` は見直す語を1行に1語で書き(「使わない語<TAB>使う語」の2列目の使う語は指摘の message に添える)、その語には `project_term` が info で出る。
+- `flag-patterns.txt` は見直す語の名前と正規表現を「名前<TAB>正規表現」で1行に1組書き、flag.txt と同じく `project_term` が出る(取り込む組 `( )` は使えず、`(?: )` と書く)。
 
 ## 検出結果の読み方
 

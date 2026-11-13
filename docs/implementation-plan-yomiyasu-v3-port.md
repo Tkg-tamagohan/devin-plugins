@@ -1,6 +1,6 @@
 # 上流 yomiyasu v3.0.0 への移植計画
 
-状態: 進行中
+状態: 完了
 
 `skills/japanese-tech-writing/` が vendored している上流 nanaism/yomiyasu の移植版を、現行ベースの v1.1.1 から v3.0.0 へ更新するための計画である。
 上流 v1.1.1 から v3.0.0 までの CHANGELOG 全項目、SKILL.md、scripts/ 配下、references/ 配下の差分を分析し、移植対象と採否を定める。
@@ -158,44 +158,44 @@
 
 ### Phase 1: 構造解析基盤の同期
 
-- [ ] `markdown_visibility.py` を上流 v3.0.0 相当へ更新する。
-- [ ] `.yomiyasu-words/` 機構を含めるかは要協議 2 の確定に従う。
-- [ ] lint/diff の入力処理を上流に揃える(BOM/CRLF の正規化、標準入力「-」、空パスの扱い、`input_path_problem`)。
+- [x] `markdown_visibility.py` を上流 v3.0.0 相当へ更新する。
+- [x] `.yomiyasu-words/` 機構を含めるかは要協議 2 の確定に従う。
+- [x] lint/diff の入力処理を上流に揃える(BOM/CRLF の正規化、標準入力「-」、空パスの扱い、`input_path_problem`)。
 - 受け入れ条件: 既存テストが通り、検出結果が変わらないこと(構造解析の等価性を確認する)。
 
 ### Phase 2: lint の info 系規則追加
 
-- [ ] `ai_phrase`、`renyo_noun`、`project_term`、`thin_evaluation`、`katakana_term`、`metaphor_label`、`say_hedge`、`narrative_density`、`dialogue_period`、`copy_comma_noun`、`bare_verb_chain`、`cleft_list_ending`、`instruction_residue`、`pause_comma` を移植する。
-- [ ] `references/lists/` の対応する一覧を同梱する。
-- [ ] `slide_comma` は `--doc-type` 導入の確定(要協議 4)に連動する。
+- [x] `ai_phrase`、`renyo_noun`、`project_term`、`thin_evaluation`、`katakana_term`、`metaphor_label`、`say_hedge`、`narrative_density`、`dialogue_period`、`copy_comma_noun`、`bare_verb_chain`、`cleft_list_ending`、`instruction_residue`、`pause_comma` を移植する。
+- [x] `references/lists/` の対応する一覧を同梱する。
+- [x] `slide_comma` は `--doc-type` 導入の確定(要協議 4)に連動する。
 - 受け入れ条件: 各規則の検出と非検出のテストを追加し、info として出ること。
 
 ### Phase 3: lint の calque 系規則追加
 
-- [ ] `calque` 型1〜4 と関連修正を移植する。
-- [ ] 型4 と doc-type 依存の扱いは要協議 5 の確定に従う。
-- [ ] `translated_term` と `heading_colon` の採否は Y-08 の再確認結果に従う。
-- [ ] `references/calques.md` を同梱する。
+- [x] `calque` 型1〜4 と関連修正を移植する。
+- [x] 型4 と doc-type 依存の扱いは要協議 5 の確定に従う。
+- [x] `translated_term` と `heading_colon` の採否は Y-08 の再確認結果に従う。
+- [x] `references/calques.md` を同梱する。
 - 受け入れ条件: calque 各型の検出テストと、allow/flag 語彙リストとの整合。
 
 ### Phase 4: lint の出力形式と CLI の更新
 
-- [ ] JSON 形式を `format_version` 2 相当へ更新するかを要協議 3 の確定に従って実施する。
-- [ ] `--doc-type`/`--reader` の導入可否は要協議 4 の確定に従う。
-- [ ] 終了コード、`--strict`/`--fail-on`、通常出力の形式を更新する。
+- [x] JSON 形式を `format_version` 2 相当へ更新するかを要協議 3 の確定に従って実施する。
+- [x] `--doc-type`/`--reader` の導入可否は要協議 4 の確定に従う。
+- [x] 終了コード、`--strict`/`--fail-on`、通常出力の形式を更新する。
 - 受け入れ条件: `test_slop_lint.py`、`slop-lint-usage.md`、CI の一括 lint が整合する。
 
 ### Phase 5: slop_diff の拡張
 
-- [ ] v1.1.2 の文の種類の印(`type_marks` 系)を移植する。
-- [ ] `meaning_risks`、`stiffness`、`tone`、`heading_shapes`、`comma_increase`、`added_actors` などの移植範囲は要協議 6 の確定に従う。
+- [x] v1.1.2 の文の種類の印(`type_marks` 系)を移植する。
+- [x] `meaning_risks`、`stiffness`、`tone`、`heading_shapes`、`comma_increase`、`added_actors` などの移植範囲は要協議 6 の確定に従う。
 - 受け入れ条件: `test_slop_diff.py` の拡充と、既存の endings 系出力の非回帰。
 
 ### Phase 6: 文書の更新
 
-- [ ] `slop-catalog.md` に採用規則に対応する行を追補する(Y-05/Y-11 の部分導入方針を継続)。
-- [ ] SKILL.md に採用規則の主題を反映する(全面置換はせず、要協議 7 の確定に従う)。
-- [ ] `slop-lint-usage.md` を CLI 仕様の変更に合わせて更新する。
+- [x] `slop-catalog.md` に採用規則に対応する行を追補する(Y-05/Y-11 の部分導入方針を継続)。
+- [x] SKILL.md に採用規則の主題を反映する(全面置換はせず、要協議 7 の確定に従う)。
+- [x] `slop-lint-usage.md` を CLI 仕様の変更に合わせて更新する。
 - 受け入れ条件: `test_catalog_consistency.py` が通り、全 Markdown 一括 lint `--strict` が通る。
 
 ### 対象外(現時点)
