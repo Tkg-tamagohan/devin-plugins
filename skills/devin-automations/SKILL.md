@@ -29,13 +29,13 @@ description: Devin Automations のオーガニゼーション固有の運用知�
     - キャッシュはインストール時点の版なので main とずれうる。
     - 使った対象と制約は成果物に明記する。
 - 書き込みが要る作業では、git proxy が使えない場合の代替として gh や api.github.com の REST をプロンプトに書いておく。
-  - Contents API で refs 作成とファイル更新、Pulls API で PR 作成とマージができる。
+  - Git References API で refs を作成し、Contents API でファイルを更新し、Pulls API で PR 作成とマージができる。
   - 全経路が失敗したときの退避として、生成物を attachments で共有して終了する指示も有効である。
 - 新しいオートメーションでは、対象リポジトリを読む必要があるなら公開経路の許可とフォールバック指示をプロンプトに入れておく。
 
 ## 自己 sleep と自動起床
 
-- 起動されたセッションは、作業の最後に自分の devin_id へ `devin_session_interact(action="sleep")` を呼んで suspend する。
+- 起動されたセッションは、作業の最後に `devin_session_interact(action="sleep", session_id=<自分の devin_id>)` を呼んで suspend する。
   - suspend によりセッションは同時実行の枠を占有しなくなる。
   - 次にメッセージが届くと自動で復帰する。
 - この自己 sleep はこの組織のスケジュール系オートメーションのプロンプトに定型として入れている。
