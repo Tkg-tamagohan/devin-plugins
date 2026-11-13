@@ -40,6 +40,7 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `chrome-extension-real-input-testing` | MV3 Chrome 拡張の実 UI 検証 — 拡張 reload 後のタブ再読込、ボットウォール下の DOM 検証、isolated world 制約 |
 | `cloudflare-access-setup` | Cloudflare Access でサイトを保護する設定手順 |
 | `dev-server-foreground-shell` | Devin VM 上での開発サーバーの起動と維持 |
+| `devin-automations` | Devin Automations 運用の org 固有知見 — git 403 の公開経路フォールバック、自己 sleep、lite と net_policy、監査系の型 |
 | `devin-review-triage` | Devin Review の指摘のトリアージと対応 |
 | `japanese-tech-writing` | 日本語技術文書の文章規範と機械検査リンター |
 | `output-format-escalation` | 説明や調査の成果物の出力形式の選択(制約付き文章、図、インタラクティブ HTML) |
