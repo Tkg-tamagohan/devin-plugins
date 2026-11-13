@@ -172,9 +172,9 @@
 
 ### Phase 3: lint の calque 系規則追加
 
-- [x] `calque` 型1〜4 と関連修正を移植する。
-- [x] 型4 と doc-type 依存の扱いは要協議 5 の確定に従う。
-- [x] `translated_term` と `heading_colon` の採否は Y-08 の再確認結果に従う。
+- [x] `calque` 型1〜3 と関連修正を移植する(型4は Y-21 により不採用)。
+- [x] 型4 と doc-type 依存の扱いは Y-20/Y-21 の確定に従う(型4は不採用、`--doc-type` は導入しない)。
+- [x] `translated_term` と `heading_colon` は Y-21 により不採用と確定した。
 - [x] `references/calques.md` を同梱する。
 - 受け入れ条件: calque 各型の検出テストと、allow/flag 語彙リストとの整合。
 

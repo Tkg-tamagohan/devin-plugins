@@ -23,6 +23,7 @@ ID は CAT-連番。方向1(カタログの各表現がリントで検出され�
 - 節 8「lint の info 規則が拾う文の形と言い回し」: 表は「規則 | 型・言い回し |
   例 | 見直すときの注意」の 4 列。語彙列の抽出はせず、列2 の「…」引用の例を
   `lint_text` にかけ、行の規則が実際に検出されることを確かめる(cat_10)。
+  各行は例の引用を1件以上持つことも確かめ、例の欠落を回帰検出する。
 
 上記で検出できない項目は EXEMPTIONS に「項目 -> 免除理由」として列挙する。
 理由のない免除はテストが弾くため、カタログ側に表現を増やすか理由を書く。
@@ -251,12 +252,21 @@ class TestCatalogCoverage(unittest.TestCase):
 
     def test_cat_10_節8の例は対応するinfo規則を検出する(self):
         # 節8は文の形と言い回しの規則を扱うため、表の例を実際に lint_text にかけ、
-        # 行の規則が findings に出ることを確かめる
+        # 行の規則が findings に出ることを確かめる。各行は例の引用を1件以上持つことも確かめる
         lines = next(s for s in catalog_sections() if s["num"] == 8)["lines"]
+        rows = table_rows(lines)[1:]
+        self.assertTrue(rows, "節8の表が読めない")
         failures = []
-        for cells in table_rows(lines)[1:]:
+        for cells in rows:
+            if len(cells) < 3:
+                failures.append((cells[0] if cells else "?", "列が足りない"))
+                continue
             rule = cells[0].strip().strip("`")
-            for example in quoted(cells[2]):
+            examples = quoted(cells[2])
+            if not examples:
+                failures.append((rule, "例の引用がない"))
+                continue
+            for example in examples:
                 text = ("## " + example + "\n\n" + _CAT10_BODY
                         if rule == "metaphor_label" else example + "\n")
                 rules = {f["rule"] for f in lint_text(text)["findings"]}

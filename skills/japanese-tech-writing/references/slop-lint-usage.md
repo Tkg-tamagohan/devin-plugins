@@ -16,7 +16,7 @@
 - `meaning-risk` は意味リスクの判定が別計画のため lint では使えない(判定には2つの文章の比較が必要で、現在はどのコマンドでも使えない)。
 - 点数(`rule_penalty_score`)は `--strict` と `--fail-on` の条件に使えない。
 - info の候補は `--strict` と `--fail-on` の条件に入らない。
-- `rule_penalty_score` は上流 2.2.0 以降で足した規則の候補を数えず、それ以外の候補は error 3、warn 2、info 1 の重さで数える(数えない規則の一覧は `--help` の末尾)。
+- `rule_penalty_score` は上流 2.2.0 以降で足した規則の候補を数えず、残りの候補を地の文1,000字あたりの密度に直して計算する(行の候補は error 3、warn 2、info 1 の重さ、excess_bold と excess_list は1件で2、bold_label_list は1を足し、negative_parallelism_density は数えず、細かい決まりは `--help` の末尾にある)。
 
 終了コードの意味は次のとおり。
 
