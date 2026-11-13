@@ -1,6 +1,6 @@
 ---
 name: output-format-escalation
-description: 説明や調査、分析の成果物に使う出力形式の選択基準と納品方法を扱う。制約付き文章、図、インタラクティブ HTML への形式のエスカレーションと、使い捨て成果物の運用を定める。ユーザーに説明や報告、解説を届けるとき、理解を助ける成果物を求められたときに使用する。日本語の文体は japanese-tech-writing、単一ファイル HTML の具体的な作り方は builtin の interactive-artifacts に委ねる。
+description: 説明や調査、分析の成果物に使う出力形式の選択基準と納品方法を扱う。制約付き文章、図、インタラクティブ HTML への形式のエスカレーションと、使い捨て成果物の運用を定める。ユーザーに説明や報告、解説を届けるとき、理解を助ける成果物を求められたときに使用する。日本語の文体は japanese-tech-writing、単一ファイル HTML の具体的な作り方は builtin の devin-artifact に委ねる。
 ---
 
 # 理解のための出力形式の選択
@@ -13,7 +13,7 @@ description: 説明や調査、分析の成果物に使う出力形式の選択�
 
 - **日本語の文体**：`japanese-tech-writing` に従う。
   本スキルは文体を定めない。
-- **HTML 成果物の作り方**：builtin の `interactive-artifacts` スキルに委ねる。
+- **HTML 成果物の作り方**：builtin の `devin-artifact` スキルに委ねる。
   本スキルは形式を選ぶ基準と納品の扱いだけを定める。
 
 ## 形式のはしご
