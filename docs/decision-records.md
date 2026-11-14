@@ -1,6 +1,6 @@
 # 決定記録
 
-実装計画 `docs/implementation-plan-yomiyasu-port.md`、`docs/implementation-plan-yomiyasu-v111-port.md`、`docs/implementation-plan-yomiyasu-v3-port.md` に関する確定済みの判断を記録する。
+このリポジトリの実装計画（`docs/implementation-plan-*.md`）に関する確定済みの判断を記録する。
 未決の項目は計画書の「要協議」節で管理し、確定したものから順に本表へ移す。
 
 | ID | 項目 | 決定内容 |
@@ -29,3 +29,8 @@
 | Y-22 | slop_diff の拡張範囲 | 段階的に移植する。まず v1.1.2 の文の種類の印と軽量な構造節(見出し、読点増加)を移植し、`meaning_risks` 全体系は別計画とする。 |
 | Y-23 | SKILL.md の更新方針 | 部分反映とする。採用した規則に対応する主題だけを現行 SKILL.md の構成に沿って取り込み、上流 v3.0.0 の全面書き直しは採用しない(Y-01/Y-12 の方針継続)。 |
 | Y-24 | references/ 新規ファイルの同梱範囲 | 採用規則が依存するもののみ同梱する。`calques.md` は calque 採用時、`lists/*.txt` は対応規則採用時に置く。`fact-recovery`、`persona`、`rephrase-test`、`audience`、`doc-types` は見送る。 |
+| R-01 | requirements-definition と後発スキル・ルールの責任分界 | 実装 PR のレビュー指摘対応は devin-review-triage、複数トラックの子セッションへの並列分割は parallel-child-implementation、計画内のユーザー手作業手順書は user-work-runbook、要件定義と計画完了後の実装セッションへの切り替え誘導は session-phase-split に委ねる。requirements-definition が扱うレビュー指摘の二分は仕様と計画の文書に対するものに限定する。 |
+| R-02 | 既存スキル間の双方向委譲と子プロンプトの統一 | windows-blueprint と windows-cli-pitfalls の相互委譲、cf-cli から cloudflare-access-setup と cloudflare-pages-private-admin への委譲、devin-review-triage から requirements-definition への委譲を補う。user-work-runbook、dev-server-foreground-shell、parallel-child-implementation に「責任範囲の境界」節を追加し、repo-drift-audit/child-prompts.md の PR 作成指示に gh pr create 時の --body-file 指定を併記する。 |
+| R-03 | 実装計画書と決定記録の 2 文書構成と未決事項の管理 | 独立した要件定義書を作らず実装計画書から始める作業（改修、移植、リファクタリングなど）では、実装計画書と決定記録の 2 文書構成を許容する。未決事項は要件定義書または実装計画書の「要協議」節で管理し、確定した時点から決定記録へ移す。 |
+| R-04 | 決定記録の ID 採番規則 | 協議中の提示では回答しやすい短い仮 ID（A, B, C など）を使い、docs/decision-records.md へ確定記録する際は、複数の計画で同一ファイルを共有できるよう主題プレフィックス付き連番（Y-01、R-01 など）または通し連番で採番する。 |
+| R-05 | README 収録一覧の双方向同期検査 | check_plugin.py の check_readme() を双方向検査に拡張し、rules/*.md と skills/*/SKILL.md の記載漏れだけでなく、README.md の収録一覧表に実ファイルやディレクトリが存在しない孤立行が残っている場合もエラーにする。 |
