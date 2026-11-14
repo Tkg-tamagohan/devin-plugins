@@ -1,6 +1,6 @@
 # プラグイン横断リファクタリング実装計画
 
-状態: 進行中
+状態: 完了
 
 `shared-skills` プラグイン全体を対象に、`requirements-definition` と後発スキル群の責任分界の整備、既存スキル間の双方向委譲の補完、決定記録の運用整合、および `skills/plugin-authoring/scripts/` の整理を行う計画。
 確定した判断は `docs/decision-records.md` の R-01 から R-05 に記録した。
@@ -55,10 +55,10 @@ PR 作成前に `plugin.json` のバージョンを順にパッチバンプし�
 
 ### Phase 3: plugin-authoring/scripts/ の重複排除、UTF-8 安全化、回帰テスト拡充
 
-- [ ] `check_plugin.py` に共有ヘルパ(`run_git`、`semver_tuple`、`version_at_ref`、`has_structural_changes`、`find_readme_table`)を実装し、各 `check_*` 関数を `root: Path = REPO_ROOT` でパラメータ化してパス表記を POSIX 形式に統一する。
-- [ ] `check_plugin.py` の `check_readme()` に `README.md` 収録一覧の孤立行を検出する双方向同期検査を実装する。
-- [ ] `new_entry.py` の重複ロジックを `check_plugin.py` からの import へ置き換え、既存の公開 API と `test_new_entry.py` 全 16 ケースの後方互換を保つ。
-- [ ] `test_check_plugin.py` に `CP-13`〜`CP-22` を追加して構造検査、状態行検査、双方向 README 検査、バンプ検査を検証し、本計画書の状態行を `状態: 完了` に、`.devin-plugin/plugin.json` を 0.2.48 へ更新する。
+- [x] `check_plugin.py` に共有ヘルパ(`run_git`、`semver_tuple`、`version_at_ref`、`has_structural_changes`、`find_readme_table`)を実装し、各 `check_*` 関数を `root: Path = REPO_ROOT` でパラメータ化してパス表記を POSIX 形式に統一する。
+- [x] `check_plugin.py` の `check_readme()` に `README.md` 収録一覧の孤立行を検出する双方向同期検査を実装する。
+- [x] `new_entry.py` の重複ロジックを `check_plugin.py` からの import へ置き換え、既存の公開 API と `test_new_entry.py` 全 16 ケースの後方互換を保つ。
+- [x] `test_check_plugin.py` に `CP-13`〜`CP-22` を追加して構造検査、状態行検査、双方向 README 検査、バンプ検査を検証し、本計画書の状態行を `状態: 完了` に、`.devin-plugin/plugin.json` を 0.2.48 へ更新する。
 
 受け入れ条件として、`test_new_entry.py` と `test_check_plugin.py` の全件、および CI(`plugin-checks.yml`)と同等の全検査コマンドが通ることとする。
 
