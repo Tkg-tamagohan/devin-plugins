@@ -24,22 +24,24 @@ import argparse
 import json
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from check_plugin import (
     NAME_PATTERN,
-    SEMVER_PATTERN,
-    VERSIONED_CONTENT_PATHS,
+    PLUGIN_JSON_PATH,
+    README_HEADINGS,
+    README_PATH,
+    find_readme_table as parse_readme_table,
+    has_structural_changes,
+    run_git,
+    semver_tuple as try_semver_tuple,
+    version_at_ref as try_version_at_ref,
 )
 
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
 TEMPLATES_DIR = Path("skills") / "plugin-authoring"
-PLUGIN_JSON_PATH = Path(".devin-plugin") / "plugin.json"
-README_PATH = Path("README.md")
-README_HEADINGS = {"rule": "### ルール", "skill": "### スキル"}
 BUMP_ORDER = ("patch", "minor")
 
 
@@ -48,13 +50,7 @@ class EntryError(Exception):
 
 
 def git(root: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    return run_git(root, *args)
 
 
 # --- plugin.json の version ---
@@ -81,23 +77,15 @@ def write_version(root: Path, version: str) -> None:
 
 def version_at_ref(root: Path, ref: str) -> Optional[str]:
     """git ref 上の plugin.json の version。取得できなければ None"""
-    try:
-        # Windows では str(Path) がバックスラッシュを返し git が
-        # 「ref:path」のパス部を解決できないため posix に固定する
-        text = git(root, "show", f"{ref}:{PLUGIN_JSON_PATH.as_posix()}")
-    except subprocess.CalledProcessError:
-        return None
-    try:
-        return json.loads(text)["version"]
-    except (json.JSONDecodeError, KeyError):
-        return None
+    version, _ = try_version_at_ref(root, ref)
+    return version
 
 
 def semver_tuple(version: str) -> Tuple[int, int, int]:
-    m = SEMVER_PATTERN.match(version)
-    if not m:
+    parsed = try_semver_tuple(version)
+    if parsed is None:
         raise EntryError(f"version が SemVer ではありません({version})")
-    return tuple(int(g) for g in m.groups())
+    return parsed
 
 
 def bumped(version: str, level: str) -> str:
@@ -109,19 +97,10 @@ def bumped(version: str, level: str) -> str:
 
 def required_level(root: Path, base_ref: str) -> Optional[str]:
     """base との差分から必要なバンプ種別を返す。差分を取得できなければ None"""
-    diff_out = ""
-    for diff_args in (
-        ["diff", "--name-status", f"{base_ref}...HEAD", "--", *VERSIONED_CONTENT_PATHS],
-        ["diff", "--name-status", "HEAD", "--", *VERSIONED_CONTENT_PATHS],
-    ):
-        try:
-            diff_out += git(root, *diff_args)
-        except subprocess.CalledProcessError:
-            return None
-    for line in diff_out.splitlines():
-        if line.strip() and line.split("\t", 1)[0].startswith(("D", "R")):
-            return "minor"
-    return "patch"
+    structural, _ = has_structural_changes(root, base_ref)
+    if structural is None:
+        return None
+    return "minor" if structural else "patch"
 
 
 def plan_version(
@@ -183,25 +162,10 @@ def find_readme_table(
     path = root / README_PATH
     if not path.is_file():
         raise EntryError(f"{README_PATH} がありません")
-    lines = path.read_text(encoding="utf-8").splitlines()
     heading = README_HEADINGS[kind]
-
-    in_section = False
-    entries: List[Tuple[int, str]] = []
-    last_table_idx: Optional[int] = None
-    for i, line in enumerate(lines):
-        if re.match(r"^#+\s", line):
-            if in_section and last_table_idx is not None:
-                break
-            in_section = line.strip().startswith(heading)
-            continue
-        if in_section and line.strip().startswith("|"):
-            last_table_idx = i
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if cells:
-                m = re.fullmatch(r"`([^`]+)`", cells[0])
-                if m:
-                    entries.append((i, m.group(1)))
+    lines, entries, last_table_idx = parse_readme_table(
+        path.read_text(encoding="utf-8"), heading
+    )
     if last_table_idx is None:
         raise EntryError(f"{README_PATH}: 「{heading}」の収録一覧の表が見つかりません")
     return lines, entries, last_table_idx
@@ -302,6 +266,11 @@ def scaffold(root: Path, kind: str, name: str, summary: str, base_ref: str) -> L
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(
         description="devin-plugins のルールとスキルの生成・記帳"
     )

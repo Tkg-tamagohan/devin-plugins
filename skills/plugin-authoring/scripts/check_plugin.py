@@ -11,7 +11,7 @@ skills/plugin-authoring/guidelines.md のチェックリストのうち、機械
 - skills/<name>/SKILL.md: 命名、frontmatter の name とディレクトリ名の一致、
   description、200 行以内
 - AGENTS.md: ## 節の本文が 5 行以内
-- README.md: 各ルール・スキル名がバッククォートつきで収録一覧に載っている
+- README.md: rules/ と skills/ が収録一覧と双方向で一致している
 - docs/*.md: チェックリストを持つ計画書に `状態:` 行(進行中/完了/中断)がある、
   「進行中」なのに全項目チェック済みの矛盾がない
 - .devin-plugin/plugin.json: name, version, description を持つ JSON。
@@ -41,11 +41,74 @@ AGENTS_SECTION_LINE_LIMIT = 5
 # version の意味づけ対象となるプラグイン中身のパス。これらの移動・改名・削除は
 # guidelines.md の規約上マイナーバンプを要求する
 VERSIONED_CONTENT_PATHS = ("rules", "skills", "AGENTS.md", "README.md")
-PLUGIN_JSON_LABEL = ".devin-plugin/plugin.json"
+PLUGIN_JSON_PATH = Path(".devin-plugin") / "plugin.json"
+PLUGIN_JSON_LABEL = PLUGIN_JSON_PATH.as_posix()
+README_PATH = Path("README.md")
+README_HEADINGS = {"rule": "### ルール", "skill": "### スキル"}
 PLUGIN_JSON_REQUIRED_STRING_FIELDS = ("name", "version", "description")
 PLUGIN_JSON_OPTIONAL_STRING_FIELDS = ("homepage", "repository", "license", "logo")
 PLUGIN_JSON_DEPENDENCY_LIST_FIELDS = ("requiredPlugins", "optionalPlugins", "forbiddenPlugins")
 PLUGIN_JSON_ALLOWED_PLATFORMS = frozenset({"cloud", "local", "security"})
+
+
+def run_git(root: Path, *args: str) -> str:
+    """指定ディレクトリで git サブコマンドを実行し、標準出力を UTF-8 で返す。"""
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    ).stdout
+
+
+def semver_tuple(version: str) -> Optional[Tuple[int, int, int]]:
+    """X.Y.Z 形式の SemVer を整数タプルに変換する。不一致時は None を返す。"""
+    if not isinstance(version, str):
+        return None
+    m = SEMVER_PATTERN.match(version)
+    if not m:
+        return None
+    return tuple(int(g) for g in m.groups())
+
+
+def version_at_ref(root: Path, ref: str) -> Tuple[Optional[str], Optional[str]]:
+    """git ref 上の plugin.json の version と失敗時のエラーメッセージを返す。"""
+    try:
+        # Windows では str(Path) がバックスラッシュを返し git が
+        # 「ref:path」のパス部を解決できないため posix に固定する
+        text = run_git(root, "show", f"{ref}:{PLUGIN_JSON_PATH.as_posix()}")
+    except subprocess.CalledProcessError as e:
+        return None, f"{ref} の plugin.json を取得できません({e.stderr.strip()})"
+    try:
+        version = json.loads(text)["version"]
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        return None, f"plugin.json の version を比較できません({e})"
+    return version, None
+
+
+def has_structural_changes(root: Path, base_ref: str) -> Tuple[Optional[bool], Optional[str]]:
+    """base_ref との差分に削除・改名(D/R)が含まれるかと失敗時のエラー詳細を返す。
+
+    base...HEAD はコミット済みの差分、HEAD は未コミット分(ローカル実行の網羅用)を見る。
+    """
+    diff_out = ""
+    for diff_args in (
+        ("diff", "--name-status", f"{base_ref}...HEAD", "--", *VERSIONED_CONTENT_PATHS),
+        ("diff", "--name-status", "HEAD", "--", *VERSIONED_CONTENT_PATHS),
+    ):
+        try:
+            diff_out += run_git(root, *diff_args)
+        except subprocess.CalledProcessError as e:
+            return None, e.stderr.strip()
+    has_structural = any(
+        line.split("\t", 1)[0].startswith(("D", "R"))
+        for line in diff_out.splitlines()
+        if line.strip()
+    )
+    return has_structural, None
 
 
 def parse_frontmatter(text: str) -> Optional[dict]:
@@ -63,13 +126,13 @@ def parse_frontmatter(text: str) -> Optional[dict]:
     return None
 
 
-def check_rules() -> List[str]:
+def check_rules(root: Path = REPO_ROOT) -> List[str]:
     errors = []
-    rules_dir = REPO_ROOT / "rules"
+    rules_dir = root / "rules"
     if not rules_dir.is_dir():
         return ["rules/ ディレクトリがありません"]
     for path in sorted(rules_dir.glob("*.md")):
-        rel = path.relative_to(REPO_ROOT)
+        rel = path.relative_to(root).as_posix()
         if not NAME_PATTERN.match(path.stem):
             errors.append(f"{rel}: ファイル名が小文字英数字とハイフンのみではありません")
         # 末尾改行が空行として数えられて実際の行数を超過させないよう splitlines で数える
@@ -92,14 +155,14 @@ def check_rules() -> List[str]:
     return errors
 
 
-def check_skills() -> List[str]:
+def check_skills(root: Path = REPO_ROOT) -> List[str]:
     errors = []
-    skills_dir = REPO_ROOT / "skills"
+    skills_dir = root / "skills"
     if not skills_dir.is_dir():
         return ["skills/ ディレクトリがありません"]
     for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
         skill_md = skill_dir / "SKILL.md"
-        rel = skill_dir.relative_to(REPO_ROOT)
+        rel = skill_dir.relative_to(root).as_posix()
         if not NAME_PATTERN.match(skill_dir.name):
             errors.append(f"{rel}: ディレクトリ名が小文字英数字とハイフンのみではありません")
         if not skill_md.is_file():
@@ -125,9 +188,9 @@ def check_skills() -> List[str]:
     return errors
 
 
-def check_agents() -> List[str]:
+def check_agents(root: Path = REPO_ROOT) -> List[str]:
     errors = []
-    path = REPO_ROOT / "AGENTS.md"
+    path = root / "AGENTS.md"
     if not path.is_file():
         return ["AGENTS.md がありません"]
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -147,47 +210,76 @@ def check_agents() -> List[str]:
     return errors
 
 
-def readme_table_names(readme: str, heading: str) -> set:
-    """README の指定節(### 見出し)にある表の第1列のバッククォート囲み名を集める。
+def find_readme_table(
+    readme: str, heading: str
+) -> Tuple[List[str], List[Tuple[int, str]], Optional[int]]:
+    """README の指定節(### 見出し)にある収録一覧の表を解析する。
 
-    収録一覧の表だけを対象にすることで、構成例や本文中の言及が
+    (全行リスト, [(行番号, バッククォート囲み名), ...], 表の最終行番号または None)
+    を返す。収録一覧の表だけを対象にすることで、構成例や本文中の言及が
     一覧掲載済みと誤認されるのを防ぐ。
     """
-    names = set()
+    lines = readme.splitlines()
     in_section = False
-    for line in readme.splitlines():
+    entries: List[Tuple[int, str]] = []
+    last_table_idx: Optional[int] = None
+    for i, line in enumerate(lines):
         # 見出しは階層を問わず節を切り替える。#### などの下位節にある表を
         # 収録一覧と取り違えないようにする
         if re.match(r"^#+\s", line):
+            if in_section and last_table_idx is not None:
+                break
             in_section = line.strip().startswith(heading)
             continue
         if in_section and line.strip().startswith("|"):
+            last_table_idx = i
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if cells:
                 m = re.fullmatch(r"`([^`]+)`", cells[0])
                 if m:
-                    names.add(m.group(1))
-    return names
+                    entries.append((i, m.group(1)))
+    return lines, entries, last_table_idx
 
 
-def check_readme() -> List[str]:
+def readme_table_names(readme: str, heading: str) -> set:
+    """README の指定節にある表の第1列のバッククォート囲み名の集合を返す。"""
+    _, entries, _ = find_readme_table(readme, heading)
+    return {name for _, name in entries}
+
+
+def check_readme(root: Path = REPO_ROOT) -> List[str]:
+    """README.md の収録一覧と rules/・skills/ の双方向同期を検査する。"""
     errors = []
-    path = REPO_ROOT / "README.md"
+    path = root / README_PATH
     if not path.is_file():
         return ["README.md がありません"]
     readme = path.read_text(encoding="utf-8")
-    rules_dir = REPO_ROOT / "rules"
-    if rules_dir.is_dir():
-        listed = readme_table_names(readme, "### ルール")
-        for f in sorted(rules_dir.glob("*.md")):
-            if f.stem not in listed:
-                errors.append(f"README.md: ルール `{f.stem}` が収録一覧の表にありません")
-    skills_dir = REPO_ROOT / "skills"
-    if skills_dir.is_dir():
-        listed = readme_table_names(readme, "### スキル")
-        for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-            if d.name not in listed:
-                errors.append(f"README.md: スキル `{d.name}` が収録一覧の表にありません")
+
+    rules_dir = root / "rules"
+    actual_rules = (
+        {f.stem for f in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
+    )
+    listed_rules = readme_table_names(readme, README_HEADINGS["rule"])
+    for name in sorted(actual_rules - listed_rules):
+        errors.append(f"README.md: ルール `{name}` が収録一覧の表にありません")
+    for name in sorted(listed_rules - actual_rules):
+        errors.append(
+            f"README.md: 収録一覧のルール `{name}` に対応するファイルが rules/ にありません"
+        )
+
+    skills_dir = root / "skills"
+    actual_skills = (
+        {d.name for d in skills_dir.iterdir() if d.is_dir()}
+        if skills_dir.is_dir()
+        else set()
+    )
+    listed_skills = readme_table_names(readme, README_HEADINGS["skill"])
+    for name in sorted(actual_skills - listed_skills):
+        errors.append(f"README.md: スキル `{name}` が収録一覧の表にありません")
+    for name in sorted(listed_skills - actual_skills):
+        errors.append(
+            f"README.md: 収録一覧のスキル `{name}` に対応するディレクトリが skills/ にありません"
+        )
     return errors
 
 
@@ -196,18 +288,18 @@ DOC_CHECKED_PATTERN = re.compile(r"^\s*[-*]\s+\[[xX]\]")
 DOC_UNCHECKED_PATTERN = re.compile(r"^\s*[-*]\s+\[ \]")
 
 
-def check_docs() -> List[str]:
+def check_docs(root: Path = REPO_ROOT) -> List[str]:
     """docs/ の計画書(チェックリストを持つ Markdown)の状態行を検査する。
 
     計画書の完了後も陳腐化した現況記述が残る事例があったため、状態行の有無と
     「進行中だが全項目チェック済み」の矛盾を機械検出する。
     """
     errors = []
-    docs_dir = REPO_ROOT / "docs"
+    docs_dir = root / "docs"
     if not docs_dir.is_dir():
         return errors
     for path in sorted(docs_dir.glob("*.md")):
-        rel = path.relative_to(REPO_ROOT)
+        rel = path.relative_to(root).as_posix()
         lines = path.read_text(encoding="utf-8").splitlines()
         has_checklist = any(
             DOC_CHECKED_PATTERN.match(l) or DOC_UNCHECKED_PATTERN.match(l)
@@ -374,50 +466,40 @@ def validate_plugin_json(data: object) -> List[str]:
     return errors
 
 
-def check_plugin_json() -> List[str]:
-    path = REPO_ROOT / ".devin-plugin" / "plugin.json"
+def check_plugin_json(root: Path = REPO_ROOT) -> List[str]:
+    path = root / PLUGIN_JSON_PATH
     if not path.is_file():
-        return [".devin-plugin/plugin.json がありません"]
+        return [f"{PLUGIN_JSON_LABEL} がありません"]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
-        return [f".devin-plugin/plugin.json: JSON として解釈できません({e})"]
+        return [f"{PLUGIN_JSON_LABEL}: JSON として解釈できません({e})"]
     return validate_plugin_json(data)
 
 
-def check_version_bump(base_ref: str) -> List[str]:
+def check_version_bump(base_ref: str, root: Path = REPO_ROOT) -> List[str]:
     """base ref と version を比較し、規約通りのバンプかを検査する
 
     guidelines.md の規約: 追加と修正はパッチ、既存ファイルの移動・改名・削除を
     含む変更はマイナーを上げる。等しくないことだけの確認では降格や非 SemVer の
     任意文字列を通してしまうため、SemVer の単調増加と変更種別の整合を検査する。
     """
-    path = REPO_ROOT / ".devin-plugin" / "plugin.json"
-    try:
-        base_text = subprocess.run(
-            ["git", "show", f"{base_ref}:.devin-plugin/plugin.json"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    except subprocess.CalledProcessError as e:
-        return [f"{base_ref} の plugin.json を取得できません({e.stderr.strip()})"]
+    base, base_err = version_at_ref(root, base_ref)
+    if base_err is not None:
+        return [base_err]
+    path = root / PLUGIN_JSON_PATH
     try:
         current = json.loads(path.read_text(encoding="utf-8"))["version"]
-        base = json.loads(base_text)["version"]
-    except (json.JSONDecodeError, KeyError, FileNotFoundError) as e:
+    except (json.JSONDecodeError, KeyError, FileNotFoundError, TypeError) as e:
         return [f"plugin.json の version を比較できません({e})"]
 
-    base_m = SEMVER_PATTERN.match(base)
-    current_m = SEMVER_PATTERN.match(current)
-    if not base_m or not current_m:
+    base_t = semver_tuple(base)
+    current_t = semver_tuple(current)
+    if base_t is None or current_t is None:
         return [
             f"plugin.json の version が SemVer ではありません({base} -> {current})。"
             "X.Y.Z 形式にしてください"
         ]
-    base_t = tuple(int(g) for g in base_m.groups())
-    current_t = tuple(int(g) for g in current_m.groups())
     if current_t == base_t:
         return [
             f"plugin.json の version が {base_ref} から変わっていません({base})。"
@@ -430,27 +512,9 @@ def check_version_bump(base_ref: str) -> List[str]:
         ]
 
     # プラグイン中身の移動・改名・削除(D/R)があればマイナー以上のバンプを要求する。
-    # base...HEAD はコミット済みの差分、HEAD は未コミット分(ローカル実行の網羅用)
-    diff_out = ""
-    for diff_args in (
-        ["git", "diff", "--name-status", f"{base_ref}...HEAD", "--", *VERSIONED_CONTENT_PATHS],
-        ["git", "diff", "--name-status", "HEAD", "--", *VERSIONED_CONTENT_PATHS],
-    ):
-        try:
-            diff_out += subprocess.run(
-                diff_args,
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-        except subprocess.CalledProcessError as e:
-            return [f"差分を取得できません({e.stderr.strip()})"]
-    has_structural = any(
-        line.split("\t", 1)[0].startswith(("D", "R"))
-        for line in diff_out.splitlines()
-        if line.strip()
-    )
+    has_structural, diff_err = has_structural_changes(root, base_ref)
+    if diff_err is not None:
+        return [f"差分を取得できません({diff_err})"]
     if has_structural and current_t[:2] <= base_t[:2]:
         return [
             f"plugin.json の version が規約に合いません({base} -> {current})。"
@@ -460,6 +524,11 @@ def check_version_bump(base_ref: str) -> List[str]:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="devin-plugins の構造検査")
     parser.add_argument(
         "--version-base",
