@@ -1,6 +1,6 @@
 ---
 name: devin-review-triage
-description: Devin Review が PR に投稿した指摘のトリアージと対応の手順。仕様書と決定記録との照合、実バグ修正と意図的挙動の切り分け、回帰テストの採番、スレッドへの返信と解決を扱う。Devin Review やレビュー bot のコメントが付いた PR を対応するときに使用する。テストの作り方と報告形式は test-conventions に委ねる。
+description: Devin Review が PR に投稿した指摘のトリアージと対応の手順。仕様書と決定記録との照合、実バグ修正と意図的挙動の切り分け、回帰テストの採番、スレッドへの返信と解決を扱う。Devin Review やレビュー bot のコメントが付いた PR を対応するときに使用する。テストの作り方と報告形式は test-conventions、未決の仕様判断の提示と決定記録への保存は requirements-definition、Windows での gh CLI の日本語引数渡しは windows-cli-pitfalls に委ねる。
 ---
 
 # Devin Review 指摘のトリアージと対応
@@ -13,6 +13,8 @@ Devin Review が PR に投稿した指摘は、修正するか根拠を説明す
 
 - **テストの作り方**：修正に添える回帰テストの ID 規約と結果報告の形式は `test-conventions` に従う。
 - **文書との矛盾**：実装と文書の扱いが食い違う指摘を含むとき、どちらを正とするかは `test-conventions` と AGENTS.md の「仕様や計画の文書がある作業ではそれを正とする」に従う。
+- **未決の仕様判断**：ユーザーへ判断を仰ぐ際の選択肢提示と決定記録への保存は `requirements-definition` に従う。
+- **Windows での CLI 引数**：`gh api graphql` へ日本語を含む本文を渡す際の組み立て方は `windows-cli-pitfalls` に委ねる。
 
 ## 手順
 

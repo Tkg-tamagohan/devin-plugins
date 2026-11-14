@@ -1,12 +1,17 @@
 ---
 name: windows-cli-pitfalls
-description: Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI の引数を扱うときの罠と回避策。Python の cp932 ロケールによる UnicodeDecodeError、gh api graphql への日本語本文で Bad unicode escape、exec 引用でのバックスラッシュ消失、Git Bash と Windows で異なる $TEMP を扱う。Windows マシンでシェルコマンドやスクリプトを組み立てるときに使用する。
+description: Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI の引数を扱うときの罠と回避策。Python の cp932 ロケールによる UnicodeDecodeError、gh api graphql への日本語本文で Bad unicode escape、exec 引用でのバックスラッシュ消失、Git Bash と Windows で異なる $TEMP を扱う。Windows マシンでシェルコマンドやスクリプトを組み立てるときに使用する。blueprint YAML の記述や $ENVRC への環境変数登録、スナップショットビルドの調査は windows-blueprint に委ねる。
 ---
 
 # Windows CLI の文字コードとエスケープの罠
 
 Windows 上の Devin セッションでは Git Bash 系のシェル経由でコマンドを実行するが、既定の文字コードが cp932 の Python、シェルの引用規則、Git Bash と Windows プロセス間のパス差異が重なり、日本語やバックスラッシュを含む操作で特有の失敗を起こす。
 対処は場面ごとに決まっているため、症状から原因へ辿れる形でまとめる。
+
+## 責任範囲の境界
+
+- **blueprint とビルド調査**：blueprint の `run` ステップでの実行モデル、`powershell -File` の制約、`$ENVRC` の記述、スナップショットビルド失敗の調査は `windows-blueprint` に委ねる。
+  - 本スキルはセッション中のシェル実行とスクリプト呼び出しだけを扱う。
 
 ## Python の既定文字コード
 

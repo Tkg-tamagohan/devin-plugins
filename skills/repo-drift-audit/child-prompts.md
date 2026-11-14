@@ -35,7 +35,7 @@
 
 ## 共通規約
 - 最新 origin/main からブランチを切る。ブランチ名は devin/$(date +%s)-<短い英語スラッグ>。main への直接 push、--no-verify、force push は禁止
-- コミット、PR タイトル、本文は日本語。PR は fetch_pr_template でテンプレートを取得してから git_create_pr で作る
+- コミット、PR タイトル、本文は日本語。PR は fetch_pr_template でテンプレートを取得してから git_create_pr で作る（gh pr create を使う場合はバッククォートのコマンド置換を防ぐため --body-file で本文を渡す）
 - 作業前にリポジトリの規約文書（<AGENTS.md、仕様の正となる文書>）を読む
 - 日本語文書を書く・直すときは文体スキルを呼び出す
 - コードを変えたら <lint、typecheck、test のコマンド> を実行してグリーンを確認する

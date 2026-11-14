@@ -1,11 +1,16 @@
 ---
 name: windows-blueprint
-description: Windows プラットフォーム向け blueprint の作成とデバッグの手順。Git Bash での実行モデル、PowerShell 呼び出しのパターン、$ENVRC への環境変数登録、スナップショットビルド失敗の調査を扱う。Windows 用の blueprint を書く、直す、またはスナップショットビルドの失敗を調査するときに使用する。
+description: Windows プラットフォーム向け blueprint の作成とデバッグの手順。Git Bash での実行モデル、PowerShell 呼び出しのパターン、$ENVRC への環境変数登録、スナップショットビルド失敗の調査を扱う。Windows 用の blueprint を書く、直す、またはスナップショットビルドの失敗を調査するときに使用する。対話シェルでの文字コードやエスケープ、gh CLI 引数の扱いは windows-cli-pitfalls に委ねる。
 ---
 
 # Windows blueprint の作成とデバッグ
 
 Windows プラットフォーム向けの blueprint を書いたり直したりするとき、およびスナップショットビルドの失敗を調査するときは、以下の知識に従う。
+
+## 責任範囲の境界
+
+- **対話シェルでの文字コードと CLI 引数**：セッション中の Python の文字コード、`gh` CLI への日本語引数、バックスラッシュの扱い、Git Bash と Windows の `$TEMP` 差異は `windows-cli-pitfalls` に委ねる。
+  - 本スキルは blueprint YAML の記述、`$ENVRC` への環境変数登録、スナップショットビルドの調査だけを扱う。
 
 ## ステップは Git Bash で実行される
 
