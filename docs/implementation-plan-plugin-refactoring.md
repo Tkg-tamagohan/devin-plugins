@@ -45,11 +45,11 @@ PR 作成前に `plugin.json` のバージョンを順にパッチバンプし�
 
 ### Phase 2: 関連スキル群の責任範囲の境界と相互委譲の整備
 
-- [ ] `windows-blueprint` と `windows-cli-pitfalls` に「責任範囲の境界」節と相互委譲を追加する。
-- [ ] `parallel-child-implementation` に「責任範囲の境界」節と `child-prompts.md` 参照を補い、`repo-drift-audit/child-prompts.md` に `gh pr create` 時の `--body-file` 指定を併記する。
-- [ ] `user-work-runbook` と `dev-server-foreground-shell` に「責任範囲の境界」節と委譲先を追加する。
-- [ ] `cf-cli` に `cloudflare-access-setup` と `cloudflare-pages-private-admin` への委譲を追加し、`devin-review-triage` に `requirements-definition` への委譲を追加する。
-- [ ] 各スキルが上限 200 行以内かつ `--strict` リントを通ることを確認し、`.devin-plugin/plugin.json` を 0.2.47 へ更新する。
+- [x] `windows-blueprint` と `windows-cli-pitfalls` に「責任範囲の境界」節と相互委譲を追加する。
+- [x] `parallel-child-implementation` に「責任範囲の境界」節と `child-prompts.md` 参照を補い、`repo-drift-audit/child-prompts.md` に `gh pr create` 時の `--body-file` 指定を併記する。
+- [x] `user-work-runbook` と `dev-server-foreground-shell` に「責任範囲の境界」節と委譲先を追加する。
+- [x] `cf-cli` に `cloudflare-access-setup` と `cloudflare-pages-private-admin` への委譲を追加し、`devin-review-triage` に `requirements-definition` への委譲を追加する。
+- [x] 各スキルが上限 200 行以内かつ `--strict` リントを通ることを確認し、`.devin-plugin/plugin.json` を 0.2.47 へ更新する。
 
 受け入れ条件として、変更した全スキルと全 Markdown が `slop_lint.py --strict` と `check_plugin.py` を通過することとする。
 
