@@ -6,7 +6,7 @@ description: 再利用可能なルールやスキル(SKILL.md)を新規作成す
 # ルールとスキルの集約先は devin-plugins リポジトリ
 
 再利用可能なルールやスキルを作成したとき、またはその保存や共有を求められたときは、必ず `Tkg-tamagohan/devin-plugins` リポジトリに登録する。
-Devin 管理のプラグイン(Customize → Skills)への登録と併用してよいが、このリポジトリが正規の管理場所である。
+Devin 管理のプラグイン(Customize → Plugins)への登録と併用してよいが、このリポジトリが正規の管理場所である。
 
 ## 手順
 
