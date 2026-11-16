@@ -26,7 +26,7 @@ description: Devin Automations のオーガニゼーション固有の運用知�
   - api.github.com と codeload.github.com の tarball 取得で公開リポジトリの main を読める。
     - これらのホストは net_policy で許可する必要がある。
   - プラグインとしてインストール済みのリポジトリならプラグインキャッシュを監査対象にできる。
-    - パスはプラットフォームで異なり、Linux は /opt/.devin/plugins/cache/、Windows は C:\ProgramData\devin\plugins_cache\cache\ である。
+    - パスはプラットフォームで異なり、Linux は `/opt/.devin/plugins/cache/`、Windows は `C:\ProgramData\devin\plugins_cache\cache\` である。
     - キャッシュはインストール時点の版なので main とずれうる。
     - 使った対象と制約は成果物に明記する。
 - 書き込みが要る作業では、git proxy が使えない場合の代替として gh や api.github.com の REST をプロンプトに書いておく。
