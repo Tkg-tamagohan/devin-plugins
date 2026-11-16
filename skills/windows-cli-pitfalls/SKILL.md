@@ -1,6 +1,6 @@
 ---
 name: windows-cli-pitfalls
-description: Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI の引数を扱うときの罠と回避策。Python の cp932 ロケールによる UnicodeDecodeError、gh api graphql への日本語本文で Bad unicode escape、exec 引用でのバックスラッシュ消失、Git Bash と Windows で異なる $TEMP を扱う。Windows マシンでシェルコマンドやスクリプトを組み立てるときに使用する。blueprint YAML の記述や $ENVRC への環境変数登録、スナップショットビルドの調査は windows-blueprint に委ねる。
+description: Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI の引数を扱うときの罠と回避策。Python の cp932 ロケールによる UnicodeDecodeError、gh api graphql への日本語本文で Bad unicode escape、二重引用内の $ 展開と引用符剥離、PowerShell での .ps1 ラッパー拒否（pnpm.cmd）、exec 引用でのバックスラッシュ消失、Git Bash と Windows で異なる $TEMP を扱う。Windows マシンでシェルコマンドやスクリプトを組み立てるときに使用する。blueprint YAML の記述や $ENVRC への環境変数登録、スナップショットビルドの調査は windows-blueprint に委ねる。
 ---
 
 # Windows CLI の文字コードとエスケープの罠
@@ -46,6 +46,15 @@ print(r.stdout)
 
 同じ回避策は `gh pr comment` や `gh issue create` の本文引数（`-b`）に日本語を渡す場面でも有効である。
 
+また、GraphQL 変数（`$owner`、`$num`）や `\"` を含むクエリを二重引用 `"..."` の中で `gh api graphql -f query="..."` や `python -c "..."` に渡すと、シェル側で変数が展開されたり引用符が剥離したりする。
+特に PowerShell ではエスケープ文字がバックスラッシュではなくバッククォートのため、`\$owner` でも変数展開を防げず `Variable reference is not valid` になり、`\"` も崩れて Python の `SyntaxError` を起こす。
+`$` や複数段の引用符を含むワンライナーは `python -c "..."` に書かず、`.py` スクリプトファイル（または bash のシングルクォートヒアドキュメント）へ逃がす。
+
+## PowerShell 経由で npm 系 CLI を呼ぶときの ExecutionPolicy
+
+Windows の PowerShell セッションや `powershell -Command` 経由で `pnpm` をそのまま呼ぶと、実行ポリシーが `Restricted` などの環境では同名の `.ps1` ラッパーが読まれて `pnpm.ps1 cannot be loaded because running scripts is disabled`（`UnauthorizedAccess`）で失敗する。
+バッチシム側（`.cmd`）を明示して `pnpm.cmd check` のように実行する。
+
 ## バックスラッシュを含む引数
 
 `\\.\pipe\<name>` のような named pipe 名や Windows の絶対パスを `exec` のコマンド列に書くと、シェルの引用処理でバックスラッシュが潰れる。
@@ -67,5 +76,6 @@ Git Bash では `$TEMP` が `/tmp` 系へ解決されることがあり、Window
 ## 原則
 
 - 文字化けや `Bad unicode escape` はシェル引数の経路を疑い、英数字だけで通るかを先に切り分ける。
-- 引用の階層が二段を超えたらスクリプトファイルへ逃がす。
+- 引用の階層が二段を超える処理や `$` や `\"` を含むワンライナーは `python -c "..."` にせずスクリプトファイルへ逃がす。
+- PowerShell で `.ps1` ラッパーが実行ポリシーにより拒否されるコマンドは `.cmd`（例: `pnpm.cmd`）を明示する。
 - Python 由来の decode/encode エラーは `PYTHONUTF8=1` と `PYTHONIOENCODING=utf-8` で環境側を直す（スクリプト自体は共有物なので環境依存の差分を入れない）。
