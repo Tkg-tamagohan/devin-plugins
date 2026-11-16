@@ -1,6 +1,6 @@
 ---
 name: windows-cli-pitfalls
-description: Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI の引数を扱うときの罠と回避策。Python の cp932 ロケールによる UnicodeDecodeError、gh api graphql への日本語本文で Bad unicode escape、二重引用内の $ 展開と引用符剥離、PowerShell での .ps1 ラッパー拒否（pnpm.cmd）、exec 引用でのバックスラッシュ消失、Git Bash と Windows で異なる $TEMP を扱う。Windows マシンでシェルコマンドやスクリプトを組み立てるときに使用する。blueprint YAML の記述や $ENVRC への環境変数登録、スナップショットビルドの調査は windows-blueprint に委ねる。
+description: Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI の引数を扱うときの罠と回避策。Python の cp932 ロケールによる UnicodeDecodeError、gh api graphql への日本語本文で Bad unicode escape、二重引用内の $ 展開と引用符剥離、PowerShell での .ps1 ラッパー拒否（pnpm.cmd）とワイルドカード非展開、exec 引用でのバックスラッシュ消失、Git Bash と Windows で異なる $TEMP を扱う。Windows マシンでシェルコマンドやスクリプトを組み立てるときに使用する。blueprint YAML の記述や $ENVRC への環境変数登録、スナップショットビルドの調査は windows-blueprint に委ねる。
 ---
 
 # Windows CLI の文字コードとエスケープの罠
@@ -55,6 +55,9 @@ print(r.stdout)
 Windows の PowerShell セッションや `powershell -Command` 経由で `pnpm` をそのまま呼ぶと、実行ポリシーが `Restricted` などの環境では同名の `.ps1` ラッパーが読まれて `pnpm.ps1 cannot be loaded because running scripts is disabled`（`UnauthorizedAccess`）で失敗する。
 バッチシム側（`.cmd`）を明示して `pnpm.cmd check` のように実行する。
 
+また、PowerShell は外部コマンドへ渡す引数中のワイルドカード（`scripts/*.py` 等）を bash のように展開しないため、`python -m py_compile scripts/*.py` はリテラルの `scripts/*.py` を開こうとして `Invalid argument` で失敗する。
+PowerShell から複数ファイルを渡すときは `Get-ChildItem scripts\*.py | Select-Object -ExpandProperty FullName` で展開してから渡す。
+
 ## バックスラッシュを含む引数
 
 `\\.\pipe\<name>` のような named pipe 名や Windows の絶対パスを `exec` のコマンド列に書くと、シェルの引用処理でバックスラッシュが潰れる。
@@ -77,5 +80,5 @@ Git Bash では `$TEMP` が `/tmp` 系へ解決されることがあり、Window
 
 - 文字化けや `Bad unicode escape` はシェル引数の経路を疑い、英数字だけで通るかを先に切り分ける。
 - 引用の階層が二段を超える処理や `$` や `\"` を含むワンライナーは `python -c "..."` にせずスクリプトファイルへ逃がす。
-- PowerShell で `.ps1` ラッパーが実行ポリシーにより拒否されるコマンドは `.cmd`（例: `pnpm.cmd`）を明示する。
+- PowerShell で `.ps1` ラッパーが実行ポリシーにより拒否されるコマンドは `.cmd`（例: `pnpm.cmd`）を明示し、ワイルドカード引数は `Get-ChildItem` で展開してから外部コマンドへ渡す。
 - Python 由来の decode/encode エラーは `PYTHONUTF8=1` と `PYTHONIOENCODING=utf-8` で環境側を直す（スクリプト自体は共有物なので環境依存の差分を入れない）。
