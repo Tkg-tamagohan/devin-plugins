@@ -67,13 +67,14 @@ Devin Review や他のレビュー bot、人間レビューが PR に投稿し�
 手順 5 の `git_comment_on_pr` と `resolve_thread_id` は環境依存のツール名である。
 `gh` が使える環境では、スレッドへの返信と解決は GraphQL の `addPullRequestReviewThreadReply` と `resolveReviewThread` が等価の操作になる。
 
-スレッドの列挙、未解決の抽出、事後検証の `headRefOid` 確認、およびインライン外のレビュー総評取得は次のとおり。
-クエリの `first:50` は先頭 50 件までしか取得しない。
-終了判定に使うときは件数が上限に達していないことを確認し、達している場合は `pageInfo` の `endCursor` で後続ページを取得する。
+スレッドの全件列挙、未解決の集計、事後検証の `headRefOid` と返信本文（文字化けや解決済みスレッドへの再指摘、編集の有無を含む）の確認、およびインライン外のレビュー総評取得は次のとおり。
+`reviewThreads(first:50)` と各スレッド内の `comments(first:50)` はそれぞれ先頭 50 件までしか取得しない。
+事後検証や終了判定に使うときは `threadsPageInfo.hasNextPage` が `false` かつ `commentPagesRemaining` が空であることを確認し、残りがある接続は `endCursor` を `after` に渡して後続ページを取得する（スレッド内のコメント続きは `node(id:"<PRRT_...>"){ ... on PullRequestReviewThread { comments(first:50, after:"<endCursor>"){ ... } } }` で辿る）。
+解決済みスレッドを除外せず全スレッドの全コメントから返信本文と再指摘や編集の有無を確認し、未解決一覧は取得結果から別に集計する。
 
 ```bash
-gh api graphql -f query='{ repository(owner:"<owner>",name:"<repo>"){ pullRequest(number:<PR>){ headRefOid reviewThreads(first:50){ pageInfo{ hasNextPage endCursor } nodes{ id isResolved isOutdated comments(first:1){ nodes{ path line body } } } } } } }' \
-  --jq '{headRefOid: .data.repository.pullRequest.headRefOid, pageInfo: .data.repository.pullRequest.reviewThreads.pageInfo, unresolved: [.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false)]}'
+gh api graphql -f query='{ repository(owner:"<owner>",name:"<repo>"){ pullRequest(number:<PR>){ headRefOid reviewThreads(first:50){ pageInfo{ hasNextPage endCursor } nodes{ id isResolved isOutdated path line originalLine comments(first:50){ pageInfo{ hasNextPage endCursor } nodes{ id author{ login } createdAt updatedAt lastEditedAt body } } } } } } }' \
+  --jq '.data.repository.pullRequest | {headRefOid, threadsPageInfo: .reviewThreads.pageInfo, commentPagesRemaining: [.reviewThreads.nodes[] | select(.comments.pageInfo.hasNextPage) | {id, endCursor: .comments.pageInfo.endCursor}], unresolvedIds: [.reviewThreads.nodes[] | select(.isResolved==false) | .id], threads: .reviewThreads.nodes}'
 gh pr view <PR> --json comments,reviews
 ```
 
