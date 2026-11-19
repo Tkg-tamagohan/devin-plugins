@@ -12,6 +12,8 @@ write ツールでマルチバイト文字を含む大きなファイルを出�
 ## 手順
 
 1. `grep -n $'\ufffd' <file>` で置換文字の混入を確認し、見つけたら修正してからコミットする。
+   - Windows PowerShell 環境では `python -c "import pathlib,sys; p=pathlib.Path(sys.argv[1]); b=[i+1 for i,l in enumerate(p.read_text('utf-8').splitlines()) if chr(0xFFFD) in l]; print(b); sys.exit(bool(b))" <file>` で確認する。
+   - PowerShell 5.1 ではシングルクォート内でも外部コマンド引数の二重引用符が剥がれるため、上記のように外側を二重引用符、内側を単一引用符に保つかスクリプトファイル経由で実行する（詳細はスキル `shared-skills:windows-cli-pitfalls` 参照）。
 2. 文書ファイルの編集やレビューをするときは `grep -rn '^<<<<<<<\|^=======$\|^>>>>>>>' <dir>` で競合マーカーの残存を確認する。
    - `=======` を行頭アンカーなしで grep すると、文中の区切り線を誤検出する。
 

@@ -1,6 +1,6 @@
 ---
 name: chrome-extension-real-input-testing
-description: MV3 Chrome 拡張を実 UI(trusted イベント)で検証するときに使用する。拡張 reload 後の content script 再注入、YouTube ボットウォール下での DOM レベル検証、isolated world でのプロパティ偽装不可、ミニプレイヤー検証、オーバーレイ位置の座標系、修飾キー付きホイールの xdotool 送出、広告ブロッカー常駐環境での障害を扱う。未パッケージ読み込みや i18n、サービスワーカー起床、CDP アタッチなどのセットアップ手順自体は対象外。
+description: MV3 Chrome 拡張を実 UI(trusted イベント)で検証するときに使用する。拡張 reload 後の content script 再注入、YouTube ボットウォール下での DOM レベル検証、isolated world でのプロパティ偽装不可、ミニプレイヤー検証、オーバーレイ位置の座標系、修飾キー付きホイールの送出(xdotool、CDP、Playwright)、広告ブロッカー常駐環境での障害を扱う。未パッケージ読み込みや i18n、サービスワーカー起床、CDP アタッチなどのセットアップ手順自体は対象外。
 ---
 
 # Chrome 拡張(MV3)を実 UI で検証する際のノウハウ
@@ -15,9 +15,9 @@ unpacked load した拡張を実スクロールや実クリック(trusted イベ
 
 ## 拡張 reload 後はテスト対象タブを必ずリロードする
 
-`chrome.runtime.reload()` や chrome://extensions のリロードボタンで拡張を更新しても、開いているタブの content script は再注入されない。
+`chrome.runtime.reload()` や `chrome://extensions` のリロードボタンで拡張を更新しても、開いているタブの content script は再注入されない。
 古い isolated world のコードが残り、DOM 上の成果物(注入済みオーバーレイ要素等)だけが残存する。
-「オーバーレイ DOM はあるのにイベントが効かない」が典型症状であり、検証前に各タブで F5 してから調べる。
+「オーバーレイ DOM はあるのにイベントが効かない」が典型症状であり、検証前に各タブで F5 またはページリロードしてから調べる。
 `chrome.runtime.id` を拾う eval が失敗する、または注入要素の有無と実動作が乖離していたら stale を疑う。
 
 ## YouTube のボットウォール環境での検証(DOM レベル代替)
@@ -43,10 +43,10 @@ DOM 要素は共有だが JS ラッパーは別物なので、main world で `Ob
 一方 `paused`/`duration`/`currentTime` などのプロパティ偽装は届かない。
 これらのガード判定は「実状態を作る」(別ページで実再生してから一時停止する等)か、content script 側の world を直接評価できる手段(CDP で isolated world コンテキストを選ぶ等)に任せる。
 
-## 修飾キー付きホイールは xdotool で送出する
+## 修飾キー付きホイールは xdotool、CDP、または Playwright で送出する
 
 `computer` ツールの `scroll` アクションに `key: "shift"` を渡しても、生成される wheel イベントは `shiftKey=false` のまま届く(2026-10 時点の Devin VM / Chrome 137 で実測)。
-Shift+スクロール等の修飾キー判定を検証するときは `xdotool` で修飾キーを押したままホイールを打つ。
+Shift+スクロール等の修飾キー判定を検証するときは、Linux VM 環境では `xdotool` で修飾キーを押したままホイールを打つ。
 
 ```bash
 # カーソルは computer ツールの mouse_move で対象要素上に置いてから実行
@@ -54,10 +54,31 @@ DISPLAY=:0 xdotool keydown Shift sleep 0.3 click 4 sleep 0.2 keyup Shift   # Shi
 DISPLAY=:0 xdotool keydown ctrl sleep 0.3 click 4 sleep 0.2 keyup ctrl    # Ctrl+上スクロール
 ```
 
-- `click 4` が上スクロール、`click 5` が下スクロール。
+`xdotool` が使えない環境(Windows 等)では、CDP の `Input.dispatchMouseEvent` または Playwright で修飾キー状態付きの実ホイールイベントを送出する。
+
+```json
+// CDP Input.dispatchMouseEvent の例(modifiers: Shift=8, Ctrl=2)
+{
+  "type": "mouseWheel",
+  "x": 400,
+  "y": 300,
+  "deltaX": 0,
+  "deltaY": -120,
+  "modifiers": 8
+}
+```
+
+```javascript
+// Playwright の例(対象要素上へ mouse.move した後に実行)
+await page.keyboard.down("Shift");
+await page.mouse.wheel(0, -120);
+await page.keyboard.up("Shift");
+```
+
+- `xdotool` では `click 4` が上スクロール、`click 5` が下スクロール。
   1 クリックあたり `deltaY=±120` で届いた。
 - Ctrl+スクロール捕捉を検証する際は、ブラウザのページズームが発生しないこと(`devicePixelRatio` 不変)も合わせて確認すると preventDefault の証拠になる。
-- 効いたかどうかは、対象ページ側に `document.addEventListener('wheel', e => ..., true)` を capture 相で貼り `e.shiftKey/ctrlKey` を記録して判定する。
+- 効いたかどうかは、対象ページ側に `document.addEventListener('wheel', e => ..., true)` を capture 相で貼り `e.shiftKey` や `e.ctrlKey` を記録して判定する。
 
 ## 広告ブロッカー常駐環境での障害
 
@@ -76,6 +97,8 @@ DISPLAY=:0 xdotool keydown ctrl sleep 0.3 click 4 sleep 0.2 keyup ctrl    # Ctrl
 
 スクリーンショットとクリックの座標は 1024×768 スケールだが、`getBoundingClientRect()` や `elementFromPoint()` は実 CSS px を返す(VM により約 1.5 倍超)。
 zoom 領域を DOM 座標から計算するときは除算して画面内に収める(上限超過でエラーになる)。
+また、Windows ホストの DPI スケーリング(`window.devicePixelRatio`)がある環境でも、物理ピクセル座標と DOM の CSS ピクセル座標の間で倍率差が生じる。
+スクリーンショットや物理ピクセル座標から DOM 座標へ変換するときは、`devicePixelRatio` や表示倍率を加味してビューポート外をはみ出さないように計算する。
 
 ## 挙動メモ(yt-frame-scrub 系検証で得たもの)
 
