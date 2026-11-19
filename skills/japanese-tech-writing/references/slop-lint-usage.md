@@ -50,6 +50,12 @@ done < <(git ls-files -z -- '*.md')
 exit $status
 ```
 
+Windows PowerShell 環境や、カレントディレクトリ外およびドット始まりディレクトリ配下（パス制限により直接引数で読めない場合）では、Python から標準入力 `-` 経由で一括検査する。
+
+```powershell
+$env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"; python -c "import pathlib, subprocess, sys; files = [p for p in sorted(pathlib.Path('.').rglob('*.md')) if p.name != 'slop-catalog.md']; failed = [(str(p), r.stdout) for p in files for r in [subprocess.run([sys.executable, 'skills/japanese-tech-writing/scripts/slop_lint.py', '--strict', '-'], input=p.read_text('utf-8'), capture_output=True, text=True, encoding='utf-8')] if r.returncode != 0]; print('\n'.join(f'=== {f} ===\n{o}' for f, o in failed) if failed else 'ALL_CLEAN'); sys.exit(bool(failed))"
+```
+
 ## 語の一覧(.yomiyasu-words/)
 
 `.yomiyasu-words/` の3つのファイルの役割は次のとおり。
