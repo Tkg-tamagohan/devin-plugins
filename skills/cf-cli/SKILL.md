@@ -52,6 +52,11 @@ npx -y cf@1.0.0-beta.29 cli search "list pages projects"
 CLOUDFLARE_ACCOUNT_ID=<id> npx -y cf@1.0.0-beta.29 pages list | jq '.[].name'
 ```
 
+```powershell
+# Windows PowerShell
+$env:CLOUDFLARE_ACCOUNT_ID="<id>"; npx -y cf@1.0.0-beta.29 pages list | jq '.[].name'
+```
+
 ## 主なコマンド
 
 実行するときは `npx -y cf@1.0.0-beta.29` に続けてサブコマンドを渡す。

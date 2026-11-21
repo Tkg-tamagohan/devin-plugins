@@ -50,6 +50,39 @@ done < <(git ls-files -z -- '*.md')
 exit $status
 ```
 
+Windows PowerShell 環境や、ドット始まりディレクトリ配下の追跡ファイルなどパス制限により直接引数で読めない場合も、CI と同じ検査集合（`git ls-files -z` と `.sloplintignore`）を Python で取得し、標準入力 `-` 経由で一括検査する。
+
+```powershell
+$env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
+@'
+import pathlib, subprocess, sys
+
+def ls(*args):
+    out = subprocess.run(
+        ["git", "ls-files", "-z", *args],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout
+    return [p for p in out.split("\0") if p]
+
+excluded = set(ls("-c", "-i", "-X", ".sloplintignore", "--", "*.md"))
+failed = []
+for f in [p for p in ls("--", "*.md") if p not in excluded]:
+    try:
+        data = pathlib.Path(f).read_bytes()
+    except OSError as e:
+        failed.append((f, str(e)))
+        continue
+    r = subprocess.run(
+        [sys.executable, "skills/japanese-tech-writing/scripts/slop_lint.py", "--strict", "-"],
+        input=data, capture_output=True,
+    )
+    if r.returncode != 0:
+        failed.append((f, (r.stdout + r.stderr).decode("utf-8", "replace").rstrip()))
+print("\n".join(f"=== {f} ===\n{o}" for f, o in failed) if failed else "ALL_CLEAN")
+sys.exit(bool(failed))
+'@ | python -
+```
+
 ## 語の一覧(.yomiyasu-words/)
 
 `.yomiyasu-words/` の3つのファイルの役割は次のとおり。
