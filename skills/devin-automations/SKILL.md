@@ -16,10 +16,11 @@ description: Devin Automations のオーガニゼーション固有の運用知�
 
 ## オートメーション起動セッションの git 403
 
-- オートメーションが起動したセッションでは、git-manager.devin.ai 経由の git clone や fetch が公開リポジトリでも HTTP 403 になる。
+- オートメーションが起動したセッションでは、git-manager.devin.ai 経由の git clone や fetch が公開リポジトリでも HTTP 403 になる場合がある。
   - 2026-10 時点で devin-plugins と Aseprite-APNG(いずれも公開リポジトリ)について、run_as=organization と run_as=creator の両方で発生を確認した。
   - 手動起動のセッションでは同じ URL で成功する。
-- 原因は未検証である。
+  - 2026-11-23 の週次監査セッション(run_as=creator)では git-manager 経由の clone が成功しており、解消済みか環境依存の可能性がある。
+- 発生条件は未検証である。
   - オートメーション起動セッションの git 認可が GitHub 接続のインストール対象リポジトリに限定される可能性がある。
   - 恒久対応はユーザー側で Settings → Integrations → GitHub の対象範囲を確認し、必要なら拡大する作業になる。
 - 回避策は公開経路の利用である。
@@ -89,6 +90,6 @@ description: Devin Automations のオーガニゼーション固有の運用知�
 
 ## 原則
 
-- オートメーション起動セッションは git proxy が 403 になり Memory Drive にも触れないため、公開経路と非オートメーション起動の常駐セッションで設計する。
+- オートメーション起動セッションは git proxy が 403 になる場合があり Memory Drive にも触れないため、公開経路と非オートメーション起動の常駐セッションで設計する。
 - 作業の終わりに自己 sleep を呼ぶ指示をプロンプトへ入れ、同時実行枠を解放して次回メッセージでの自動起床に任せる。
 - lite、最小の net_policy、run_as=creator、失敗時のみの通知で、定期タスクのコストと露出を抑える。
