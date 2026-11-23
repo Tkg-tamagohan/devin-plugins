@@ -19,7 +19,7 @@ description: Devin Automations のオーガニゼーション固有の運用知�
 - オートメーションが起動したセッションでは、git-manager.devin.ai 経由の git clone や fetch が公開リポジトリでも HTTP 403 になる場合がある。
   - 2026-10 時点で devin-plugins と Aseprite-APNG(いずれも公開リポジトリ)について、run_as=organization と run_as=creator の両方で発生を確認した。
   - 手動起動のセッションでは同じ URL で成功する。
-  - 2026-11-23 の週次監査セッション(run_as=creator)では git-manager 経由の clone が成功しており、解消済みか環境依存の可能性がある。
+  - 2026-11-23 の週次監査セッション(run_as=creator)では devin-plugins への git-manager 経由の clone が成功しており、解消済みか環境依存の可能性がある。
 - 発生条件は未検証である。
   - オートメーション起動セッションの git 認可が GitHub 接続のインストール対象リポジトリに限定される可能性がある。
   - 恒久対応はユーザー側で Settings → Integrations → GitHub の対象範囲を確認し、必要なら拡大する作業になる。
