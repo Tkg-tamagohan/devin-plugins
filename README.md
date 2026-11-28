@@ -21,10 +21,11 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `cloudflare-pages-private-admin` | Cloudflare Pages の公開アプリに非公開の管理ツールを併設するとき |
 | `library-license` | 外部ライブラリやパッケージを導入、更新、転用するとき |
 | `merge-detected-sleep` | 自分が作成または監視する PR のマージイベントを検知したとき |
+| `pre-pr-verification` | PR の作成や更新、レビュー指摘のトリアージ、または複数モジュール実装の統合検証をするとき |
 | `region-near-japan` | クラウドリソースのリージョンを選ぶとき |
 | `register-to-devin-plugins` | 再利用可能なルールやスキルを作成したとき |
 | `scoped-secret-provisioning` | ユーザーにシークレットの登録を依頼するとき |
-| `session-phase-split` | 開発フェーズが切り替わるとき、セッションの作業が長期化したとき |
+| `session-phase-split` | 開発フェーズが切り替わるとき、別セッション向けの計画やプロンプトを作成するとき、セッションの作業が長期化したとき |
 | `test-conventions` | テストコードの作成や修正、テスト結果の報告をするとき |
 | `ui-mock-first` | ユーザー操作を伴う UI の開発やテストをするとき |
 | `verify-file-writes` | マルチバイト文字を含むファイルの作成や文書編集のあと |
@@ -39,10 +40,10 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `cf-cli` | Cloudflare 公式 CLI `cf` の実行方法 |
 | `chrome-extension-real-input-testing` | MV3 Chrome 拡張の実 UI 検証 — 拡張 reload 後のタブ再読込、ボットウォール下の DOM 検証、isolated world 制約 |
 | `cloudflare-access-setup` | Cloudflare Access でサイトを保護する設定手順 |
-| `concise-ui-copy` | UI 作成時に冗長なガイド文や自明な説明を排除し、必要な制約と影響だけを残す基準と書き換え例 |
+| `concise-ui-copy` | UI 作成時に冗長なガイド文や不要なセカンダリラベルを排除し、レイアウトで関係を示しつつ必要な制約と影響だけを残す基準と書き換え例 |
 | `dev-server-foreground-shell` | Devin VM 上での開発サーバーの起動と維持 |
 | `devin-automations` | Devin Automations 運用の org 固有知見 — git 403 の公開経路フォールバック、自己 sleep、lite と net_policy、監査系の型 |
-| `devin-review-triage` | Devin Review の指摘のトリアージと対応 |
+| `devin-review-triage` | Devin Review やレビュー指摘の実物照合トリアージ、3 区分分類、未解決スレッド整理と事後検証の手順 |
 | `github-actions-ci` | GitHub Actions で必須チェックを壊さないジョブスキップ、権限とロック固定、リリース前後検証、定期監査を設計または監査する手順 |
 | `japanese-tech-writing` | 日本語技術文書の文章規範と機械検査リンター |
 | `output-format-escalation` | 説明や調査の成果物の出力形式の選択(制約付き文章、図、インタラクティブ HTML) |
@@ -50,9 +51,11 @@ frontmatter の `description` に合う状況のセッションでのみ本文�
 | `plugin-authoring` | このリポジトリへのルールやスキルの追加手順 |
 | `repo-drift-audit` | 文書やテスト資産とコードの乖離と手順の機械化余地の網羅監査 |
 | `requirements-definition` | 要件定義や仕様確定の進め方 |
+| `systems-pre-pr-audit` | 常駐システムと複数モジュール境界における有界性、停止順、時間軸、原子性、認可とタイムアウト、非同期テスト同期の PR 前監査 |
+| `test-suite-pruning` | 既存テストスイートの不要テスト走査、履歴と仕様の裏取りに基づく削除、重複統合、孤立したテスト補助コード掃除の手順 |
 | `user-work-runbook` | ユーザーが手作業で行う運用の手順書作成 |
 | `windows-blueprint` | Windows 向け blueprint の作成とデバッグ |
-| `windows-cli-pitfalls` | Windows 上のシェルでマルチバイト文字、バックスラッシュ、gh CLI 引数を扱うときの罠と回避策 |
+| `windows-cli-pitfalls` | Windows 上のシェル(Git Bash と PowerShell 5.1)でマルチバイト文字、環境変数、引用、バックスラッシュ、gh CLI を扱うときの罠と回避策 |
 
 ## 構成
 
